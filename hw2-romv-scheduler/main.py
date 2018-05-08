@@ -17,6 +17,8 @@ if __name__ == '__main__':
 
     scheduler = scheduler_type()
     simulator = TransactionsWorkloadSimulator()
-    simulator.load_test_data(data_filename='transactions.dat')
-    simulator.add_work_to_scheduler(scheduler)
+    simulator.load_test_data(workload_data_filename='transactions.dat')
+    simulator.add_initialization_transaction_to_scheduler(scheduler)
+    scheduler.run()
+    simulator.add_workload_to_scheduler(scheduler)
     scheduler.run()

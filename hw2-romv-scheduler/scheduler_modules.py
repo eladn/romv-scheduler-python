@@ -124,14 +124,14 @@ class Transaction:
         assert len(self._waiting_operations_queue) > 0
         return self._waiting_operations_queue[0]
 
-    def try_perform_next_operation(self, data_access_manager):
+    def try_perform_next_operation(self, scheduler):
         assert len(self._waiting_operations_queue) > 0
 
         next_operation = self._waiting_operations_queue[0]
-        next_operation.try_perform(data_access_manager)
+        next_operation.try_perform(scheduler)
 
         if not next_operation.is_completed:
-            self._on_operation_failed_callback(self, next_operation)
+            self._on_operation_failed_callback(self, scheduler, next_operation)
             return False
 
         queue_head = self._waiting_operations_queue.pop(index=0)
@@ -140,7 +140,7 @@ class Transaction:
             self._is_completed = True
         if self._on_operation_complete_callback:
             # The user callback might now add the next operation.
-            self._on_operation_complete_callback(self, next_operation)
+            self._on_operation_complete_callback(self, scheduler, next_operation)
         return True
 
     def next_operation_completed(self):
