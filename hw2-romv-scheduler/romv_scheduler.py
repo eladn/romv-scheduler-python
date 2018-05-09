@@ -1,4 +1,4 @@
-from scheduler_modules import Scheduler, Transaction
+from scheduler_base_modules import Scheduler, Transaction
 
 
 class MultiVersionDataManager:
