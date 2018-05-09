@@ -40,7 +40,7 @@ class Operation(ABC):
 
 
 class WriteOperation(Operation):
-    def __init__(self, variable, to_write_value):
+    def __init__(self, variable, to_write_value=None):
         super().__init__(operation_type='write',
                          variable=variable)
         self._to_write_value = to_write_value
@@ -49,6 +49,11 @@ class WriteOperation(Operation):
     def to_write_value(self):
         assert self._to_write_value is not None
         return self._to_write_value
+
+    @to_write_value.setter
+    def to_write_value(self, to_write_value):
+        assert self._to_write_value is None
+        self._to_write_value = to_write_value
 
     def try_perform(self, data_access_manager):
         succeed = data_access_manager.try_write(self.transaction_id, self.variable, self._to_write_value)
