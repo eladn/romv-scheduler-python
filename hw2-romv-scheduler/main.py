@@ -1,7 +1,8 @@
 
 import argparse
 from user_simulator import TransactionsWorkloadSimulator
-from romv_scheduler import ROMVScheduler, SerialScheduler
+from romv_scheduler import ROMVScheduler
+from serial_scheduler import SerialScheduler
 
 DEFAULT_TEST_FILENAME = 'transactions.dat'
 
