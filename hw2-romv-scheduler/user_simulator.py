@@ -1,4 +1,4 @@
-
+import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
 from scheduler_base_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
 
 
@@ -132,7 +132,7 @@ class TransactionSimulator:
         assert self._transaction is None
         self._execution_attempt_no += 1
         self._local_variables = dict()
-        self._ongoing_operation_simulators_queue = list(self._all_operation_simulators)  # TODO: deep-clone!
+        self._ongoing_operation_simulators_queue = copy.deepcopy(self._all_operation_simulators)
         self.create_transaction()
         # Add the first operation to the transaction, so the transaction won't be empty.
         self.add_next_operation_to_transaction_if_needed()
