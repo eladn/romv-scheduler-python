@@ -77,6 +77,8 @@ class TransactionSimulator:
         return self._transaction.transaction_id
 
     def add_transaction_to_scheduler(self, scheduler):
+        # Firstly add the first operation to the transaction, so the transaction won't be empty.
+        self.add_next_operation_to_transaction_if_needed()
         scheduler.add_transaction(self._transaction)
 
     def add_write_operation_simulator(self, write_operation: WriteOperation, src_variable_name_or_const_val):
@@ -126,6 +128,11 @@ class TransactionsWorkloadSimulator:
         self._transaction_id_to_transaction_simulator = dict()  # FIXME: maybe we don't need it
         self._schedule = 'RR'
 
+    @property
+    def schedule(self):
+        return self._schedule
+
+    # Parse the test file and add its contents to the simulator.
     def load_test_data(self, workload_data_filename='transactions.dat'):
         with open(workload_data_filename, 'r') as test_file:
             test_first_line = test_file.readline()
@@ -142,6 +149,10 @@ class TransactionsWorkloadSimulator:
                 self._transaction_id_to_transaction_simulator[transaction_simulator.transaction_id] = transaction_simulator
             assert num_of_transactions == len(self._transaction_simulators)
 
+    # Given an scheduler, initiate the transactions (except for T0) in the scheduler.
+    # For each transaction, add the first operation to it.
+    # For each transaction, add a callback to be called by the scheduler after an operation has been completed,
+    # so that the matching TransactionSimulator would insert the next operation.
     def add_workload_to_scheduler(self, scheduler: Scheduler):
         for transaction_simulator in self._transaction_simulators:
             # FIXME: do we want to just skip the first transaction?
