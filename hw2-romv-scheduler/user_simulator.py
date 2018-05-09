@@ -1,5 +1,4 @@
 
-from collections import namedtuple
 from scheduler_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
 
 
@@ -8,7 +7,42 @@ class SchedulerExecutionLogger:
     pass
 
 
-OperationSimulator = namedtuple('OperationSimulator', ['operation', 'local_variable'])
+class OperationSimulator:
+    def __init__(self, operation: Operation):
+        self._operation = operation
+
+    @property
+    def operation(self):
+        return self._operation
+
+
+class ReadOperationSimulator(OperationSimulator):
+    def __init__(self, operation: Operation, dest_local_variable_name: str):
+        super().__init__(operation)
+        self._dest_local_variable_name = dest_local_variable_name
+
+    @property
+    def dest_local_variable_name(self):
+        return self._dest_local_variable_name
+
+
+class WriteOperationSimulator(OperationSimulator):
+    def __init__(self, operation: Operation, src_local_variable_name_or_const_val):
+        super().__init__(operation)
+        self._src_local_variable_name = None
+        self._const_val = None
+        potential_identifier = str(src_local_variable_name_or_const_val).strip()
+        if potential_identifier.isidentifier():
+            self._src_local_variable_name = potential_identifier
+        else:
+            self._const_val = src_local_variable_name_or_const_val  # TODO: do we want to cast the value to int() ?
+
+    def get_value_to_write(self, local_variables):
+        if self._const_val is not None:
+            assert self._src_local_variable_name is None
+            return self._const_val
+        assert self._src_local_variable_name is not None
+        return local_variables[self._src_local_variable_name]
 
 
 # Simulate the execution of a transaction.
@@ -30,8 +64,11 @@ class TransactionSimulator:
         is_read_only = False  # TODO: parse from `transaction_line`
         transaction_simulator = TransactionSimulator(transaction_id, is_read_only)
 
-        # TODO: parse transaction operations from line.
-        # For each operation use: transaction_simulator.add_operation_simulator(operation, local_variable)
+        # TODO: parse transaction operations one-by-one from `transaction_line`.
+        # For each operation use one of these:
+        # transaction_simulator.add_write_operation_simulator(write_operation, src_local_variable_name_or_const_value)
+        # transaction_simulator.add_read_operation_simulator(read_operation, dest_local_variable_name)
+        # transaction_simulator.add_commit_operation_simulator(commit_operation)
 
         return transaction_simulator
 
@@ -42,15 +79,25 @@ class TransactionSimulator:
     def add_transaction_to_scheduler(self, scheduler):
         scheduler.add_transaction(self._transaction)
 
-    def add_operation_simulator(self, operation: Operation, local_variable):
-        operation_simulator = OperationSimulator(operation=operation, local_variable=local_variable)
+    def add_write_operation_simulator(self, write_operation: WriteOperation, src_variable_name_or_const_val):
+        operation_simulator = WriteOperationSimulator(write_operation, src_variable_name_or_const_val)
         self._operation_simulators.append(operation_simulator)
 
-    def add_next_operation_to_transaction(self):
+    def add_read_operation_simulator(self, read_operation: ReadOperation, dest_variable_name):
+        operation_simulator = ReadOperationSimulator(read_operation, dest_variable_name)
+        self._operation_simulators.append(operation_simulator)
+
+    def add_commit_operation_simulator(self, commit_operation: CommitOperation):
+        operation_simulator = OperationSimulator(commit_operation)
+        self._operation_simulators.append(operation_simulator)
+
+    def add_next_operation_to_transaction_if_needed(self):
+        if len(self._operation_simulators) < 1:
+            return
         next_operation_simulator = self._operation_simulators[0]
         if next_operation_simulator.operation == 'write':
-            value_to_write = self._local_variables[next_operation_simulator.local_variable]
-            next_operation_simulator.operation.write_value = value_to_write
+            value_to_write = next_operation_simulator.get_value_to_write(self._local_variables)
+            next_operation_simulator.operation.to_write_value = value_to_write
         self._transaction.add_operation(next_operation_simulator.operation)
 
     def operation_completed(self, scheduler: Scheduler, operation: Operation):
@@ -58,9 +105,9 @@ class TransactionSimulator:
         operation_simulator = self._operation_simulators.pop(index=0)
         assert(operation == operation_simulator.operation)
         if operation.get_type() == 'read':
-            dest_local_var_name = operation_simulator.local_variable
+            dest_local_var_name = operation_simulator.dest_local_variable_name
             self._local_variables[dest_local_var_name] = operation.read_value
-            self.add_next_operation_to_transaction()
+        self.add_next_operation_to_transaction_if_needed()
         # TODO: print to execution log!
 
     def operation_failed(self, scheduler: Scheduler, operation: Operation):
