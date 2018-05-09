@@ -7,6 +7,12 @@ class SchedulerExecutionLogger:
     pass  # TODO: impl
 
 
+# Operation simulator is responsible for storing an operation to perform.
+# A simple `Operation` is not familiar with the concept of "local variables".
+# Sometimes the next operation to perform might read a value from a local variable, or write a value to it.
+# The inheritors `ReadOperationSimulator` and `WriteOperationSimulator` handle accessing these local variables.
+# All of the local variable are stored by the `TransactionSimulator` as can be seen later.
+# The `TransactionSimulator` may contain instances of kind `OperationSimulator`.
 class OperationSimulator:
     def __init__(self, operation: Operation):
         self._operation = operation
@@ -46,9 +52,14 @@ class WriteOperationSimulator(OperationSimulator):
 
 
 # Simulate the execution of a transaction.
+# Stores all of the local variables that can be accessed by the operation-simulators.
+# After each operation completes, the `on_complete_callback` will be called (by the scheduler),
+# and the next operation to perform would be added by the `TransactionSimulator`.
 class TransactionSimulator:
     def __init__(self, transaction_id, is_read_only: bool):
+        # Maybe we could just use `self` in the lambda functions. I didn't want to take the chance it might be wrong.
         me = self
+
         self._transaction = Transaction(transaction_id,
                                         is_read_only,
                                         on_operation_complete_callback=lambda *args: me.operation_completed(*args),
@@ -119,9 +130,7 @@ class TransactionSimulator:
         # TODO: print to execution log!
 
 
-# Parse the input test file and add transactions and their operations.
-# After each operation ends a `on_complete_callback` will be called (by the scheduler),
-# and the next operation would be added by the `TransactionsWorkloadSimulator`.
+# Parse the input test file and add transactions and their operations to the given scheduler.
 class TransactionsWorkloadSimulator:
     def __init__(self):
         self._transaction_simulators = []
@@ -133,7 +142,7 @@ class TransactionsWorkloadSimulator:
         return self._schedule
 
     # Parse the test file and add its contents to the simulator.
-    def load_test_data(self, workload_data_filename='transactions.dat'):
+    def load_test_data(self, workload_data_filename):
         with open(workload_data_filename, 'r') as test_file:
             test_first_line = test_file.readline()
             # TODO: parse test first line
