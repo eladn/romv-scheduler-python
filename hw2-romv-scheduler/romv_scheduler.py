@@ -9,19 +9,18 @@ class LocksTable:
     pass  # TODO: impl
 
 
+# TODO: fully doc it!
+# When the `Scheduler` encounters a deadlock, it chooses a victim transaction and aborts it.
+# It means that the scheduler would have to store the operations in a redo-log.
 class ROMVScheduler(Scheduler):
     def __init__(self):
         super().__init__()
-        self._ongoing_transactions = []
-        self._transactions_mapping = dict()
         self._locks_table = LocksTable()
         # TODO: do we want to maintain a `wait_for` graph?
 
-    def add_transaction(self, transaction: Transaction):
-        assert not transaction.is_completed
-        self._ongoing_transactions.append(transaction)
-        self._transactions_mapping[transaction.transaction_id] = transaction
+    def on_add_transaction(self, transaction: Transaction):
         # TODO: here we need to give timestamp for RO transactions.
+        pass
 
     def run(self):
         while len(self._ongoing_transactions) > 0:
@@ -40,15 +39,13 @@ class ROMVScheduler(Scheduler):
     def try_read(self, transaction_id, variable):
         pass  # TODO: impl
 
-    def remove_completed_transactions(self):
-        self._ongoing_transactions = [transaction
-                                      for transaction in self._ongoing_transactions
-                                      if not transaction.is_completed]
-        self._transactions_mapping = {transaction.transaction_id: transaction
-                                      for transaction in self._ongoing_transactions}
-
     def detect_and_handle_deadlocks(self):
         pass  # TODO: impl
+
+    def abort_transaction(self, transaction: Transaction):
+        self.remove_transaction(transaction)
+        transaction.abort(self)
+        # TODO: undo the transaction.
 
 
 class SerialScheduler(Scheduler):

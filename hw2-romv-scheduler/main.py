@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     # Initialize the relevant scheduler.
     # By default use the scheduling scheme mentioned in the test file.
-    # If a certain scheduling scheme mentioned explicity in the arguments, use it.
+    # If a certain scheduling scheme mentioned explicitly in the arguments, use it.
     schedule_scheme = simulator.schedule
     if args.sched:
         schedule_scheme = args.sched

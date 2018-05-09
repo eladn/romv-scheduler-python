@@ -125,15 +125,19 @@ class CommitOperation(Operation):
 class Transaction:
     def __init__(self, transaction_id, is_read_only: bool,
                  on_operation_complete_callback=None,
-                 on_operation_failed_callback=None):
+                 on_operation_failed_callback=None,
+                 on_transaction_aborted_callback=None):
         self._transaction_id = transaction_id
         self._is_read_only = is_read_only
         self._waiting_operations_queue = []
         self._is_completed = False
+        self._is_aborted = False
         # To be called after an operation has been completed.
         self._on_operation_complete_callback = on_operation_complete_callback
         # To be called after an operation has failed (and now waiting till next attempt) due to locks.
         self._on_operation_failed_callback = on_operation_failed_callback
+        # To be called after a transaction has been aborted by the scheduler.
+        self._on_transaction_aborted_callback = on_transaction_aborted_callback
 
     @property
     def transaction_id(self):
@@ -147,10 +151,16 @@ class Transaction:
     def is_completed(self):
         return self._is_completed
 
+    @property
+    def is_aborted(self):
+        return self._is_aborted
+
     def peek_next_operation(self):
         assert len(self._waiting_operations_queue) > 0
         return self._waiting_operations_queue[0]
 
+    # Always return the operation that we tried to perform.
+    # To check whether it has been performed, use `operation.is_completed`.
     def try_perform_next_operation(self, scheduler):
         assert len(self._waiting_operations_queue) > 0
 
@@ -159,7 +169,7 @@ class Transaction:
 
         if not next_operation.is_completed:
             self._on_operation_failed_callback(self, scheduler, next_operation)
-            return False
+            return next_operation
 
         queue_head = self._waiting_operations_queue.pop(index=0)
         assert queue_head == next_operation
@@ -168,7 +178,17 @@ class Transaction:
         if self._on_operation_complete_callback:
             # The user callback might now add the next operation.
             self._on_operation_complete_callback(self, scheduler, next_operation)
-        return True
+        return next_operation
+
+    # called by the scheduler after removing this transaction from it's transactions list.
+    def abort(self, scheduler):
+        assert not self._is_aborted and not self._is_completed
+        assert self._transaction_id is not None
+        assert scheduler.get_transaction_by_id(self._transaction_id) is None
+        self._is_aborted = True
+        # TODO: what else should be done here?
+        if self._on_transaction_aborted_callback:
+            self._on_transaction_aborted_callback(self, scheduler)
 
     def add_operation(self, operation: Operation):
         assert not self._is_read_only or operation.get_type() != 'write'
@@ -179,12 +199,37 @@ class Transaction:
 # This is a pure-abstract class. It is inherited later by the `ROMVScheduler` and the `SerialScheduler`.
 class Scheduler(ABC):
     def __init__(self):
-        pass
+        self._ongoing_transactions = []
+        self._ongoing_transactions_mapping = dict()
+
+    def add_transaction(self, transaction: Transaction):
+        assert not transaction.is_completed and not transaction.is_aborted
+        assert transaction.transaction_id not in self._ongoing_transactions_mapping
+        self._ongoing_transactions.append(transaction)  # TODO: append in the right place!
+        self._ongoing_transactions_mapping[transaction.transaction_id] = transaction
+        self.on_add_transaction(transaction)
+
+    def remove_transaction(self, transaction: Transaction):
+        assert transaction.transaction_id in self._ongoing_transactions_mapping
+        assert transaction.transaction_id in self._ongoing_transactions
+        self._ongoing_transactions.remove(transaction)
+
+    def remove_completed_transactions(self):
+        self._ongoing_transactions = [transaction
+                                      for transaction in self._ongoing_transactions
+                                      if not transaction.is_completed]
+        self._ongoing_transactions_mapping = {transaction.transaction_id: transaction
+                                              for transaction in self._ongoing_transactions}
+
+    def get_transaction_by_id(self, transaction_id):
+        if transaction_id in self._ongoing_transactions_mapping:
+            return self._ongoing_transactions_mapping[transaction_id]
+        return None
 
     # Called by the user.
     @abstractmethod
-    def add_transaction(self, transaction: Transaction):
-        ...
+    def on_add_transaction(self, transaction: Transaction):
+        pass  # default implementation - do nothing
 
     # Called by the user. Perform transactions until no transactions left.
     @abstractmethod
