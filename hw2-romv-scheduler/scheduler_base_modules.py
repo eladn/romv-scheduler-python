@@ -110,6 +110,19 @@ class CommitOperation(Operation):
         return True
 
 
+# We could create our own type. In real life case, we should create our own type so it would deal with overflows.
+Timestamp = int
+
+
+class TimestampsManager:
+    def __init__(self):
+        self._last_timestamp = Timestamp()
+
+    def get_next_ts(self):
+        self._last_timestamp += 1
+        return self._last_timestamp
+
+
 # Transaction is the API between the scheduler and the user.
 # It allows the user to add operations to it, using `add_operation(..)` method.
 # The scheduler calls the method `try_perform_next_operation(..)` when it decides to.
@@ -123,7 +136,7 @@ class CommitOperation(Operation):
 # Otherwise, the callback `on_operation_failed_callback(..)` is called.
 # These users' callbacks are set on the transaction creation.
 class Transaction:
-    def __init__(self, transaction_id, is_read_only: bool,
+    def __init__(self, transaction_id, is_read_only: bool=False,
                  on_operation_complete_callback=None,
                  on_operation_failed_callback=None,
                  on_transaction_aborted_callback=None):
@@ -132,6 +145,7 @@ class Transaction:
         self._waiting_operations_queue = []
         self._is_completed = False
         self._is_aborted = False
+        self._timestamp = None
         # To be called after an operation has been completed.
         self._on_operation_complete_callback = on_operation_complete_callback
         # To be called after an operation has failed (and now waiting till next attempt) due to locks.
@@ -155,6 +169,16 @@ class Transaction:
     def is_aborted(self):
         return self._is_aborted
 
+    @property
+    def timestamp(self):
+        assert self._timestamp is not None
+        return self._timestamp
+
+    @timestamp.setter
+    def timestamp(self, ts: Timestamp):
+        assert self._timestamp is None  # can be set only once in a life of a transaction.
+        self._timestamp = ts
+
     def peek_next_operation(self):
         assert len(self._waiting_operations_queue) > 0
         return self._waiting_operations_queue[0]
@@ -166,6 +190,10 @@ class Transaction:
 
         next_operation = self._waiting_operations_queue[0]
         next_operation.try_perform(scheduler)
+
+        if self.is_aborted:
+            # TODO: what to do here?
+            return next_operation
 
         if not next_operation.is_completed:
             self._on_operation_failed_callback(self, scheduler, next_operation)
@@ -198,6 +226,9 @@ class Transaction:
 
 # This is a pure-abstract class. It is inherited later by the `ROMVScheduler` and the `SerialScheduler`.
 class Scheduler(ABC):
+    ROTransaction = Transaction
+    UTransaction = Transaction
+
     def __init__(self):
         self._ongoing_transactions = []
         self._ongoing_transactions_mapping = dict()
@@ -245,3 +276,18 @@ class Scheduler(ABC):
     @abstractmethod
     def try_read(self, transaction_id, variable):
         ...
+
+
+# Notice: we could use a bloom-filter here. # TODO: elaborate on it.
+class VariablesSet:
+    def __init__(self):
+        pass  # TODO: impl
+
+    def add_variable(self):
+        pass  # TODO: impl
+
+    def is_variable_exists(self):
+        pass  # TODO: impl
+
+    def intersect(self, another_variables_set):
+        pass  # TODO: impl

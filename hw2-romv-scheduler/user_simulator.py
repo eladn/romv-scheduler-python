@@ -117,23 +117,24 @@ class TransactionSimulator:
     def execution_attempt_number(self):
         return self._execution_attempt_no
 
-    def create_transaction(self):
+    def create_transaction(self, scheduler: Scheduler):
         assert self._transaction is None
         # Use automatic variable `me` to be captured by the lambda functions. Maybe we could just
         # use `self` in the lambda functions. I didn't want to take the chance it might be wrong.
         me = self
-        self._transaction = Transaction(self._transaction_id,
-                                        self._is_read_only,
-                                        on_operation_complete_callback=lambda *args: me.operation_completed(*args),
-                                        on_operation_failed_callback=lambda *args: me.operation_failed(*args),
-                                        on_transaction_aborted_callback=lambda *args: me.transaction_aborted(*args))
+        TransactionType = scheduler.ROTransaction if self._is_read_only else scheduler.UTransaction
+        self._transaction = TransactionType(self._transaction_id,
+                                            self._is_read_only,
+                                            on_operation_complete_callback=lambda *args: me.operation_completed(*args),
+                                            on_operation_failed_callback=lambda *args: me.operation_failed(*args),
+                                            on_transaction_aborted_callback=lambda *args: me.transaction_aborted(*args))
 
     def add_transaction_to_scheduler(self, scheduler):
         assert self._transaction is None
         self._execution_attempt_no += 1
         self._local_variables = dict()
         self._ongoing_operation_simulators_queue = copy.deepcopy(self._all_operation_simulators)
-        self.create_transaction()
+        self.create_transaction(scheduler)
         # Add the first operation to the transaction, so the transaction won't be empty.
         self.add_next_operation_to_transaction_if_needed()
         scheduler.add_transaction(self._transaction)
