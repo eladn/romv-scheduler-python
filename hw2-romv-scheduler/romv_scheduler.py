@@ -1,5 +1,5 @@
 from collections import namedtuple
-from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager, VariablesSet
+from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager, NoFalseNegativeVariablesSet
 
 
 # Invariant: at any point in time, there is no cycle in the "wait-for" graph.
@@ -48,10 +48,10 @@ class MultiVersionDataManager:
         # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
         pass  # TODO: impl
 
-    def read_older_version_than(self, variable, max_ts):
+    def read_older_version_than(self, variable, max_ts: Timestamp):
         pass  # TODO: impl
 
-    def write_new_version(self, variable, new_value, ts):
+    def write_new_version(self, variable, new_value, ts: Timestamp):
         pass  # TODO: impl
 
     def get_latest_version_number(self, variable):
@@ -60,12 +60,15 @@ class MultiVersionDataManager:
     def read_latest_version(self, variable):
         pass  # TODO: impl
 
+    def delete_old_versions_in_interval(self, variable, from_ts: Timestamp, to_ts: Timestamp):
+        pass  # TODO: impl
+
 
 class ROMVTransaction(Transaction):
     def __init__(self, *args, **kargs):
         kargs['is_read_only'] = True
         super().__init__(*args, **kargs)
-        self._committed_variables_set_since_last_reader_born = VariablesSet()
+        self._committed_variables_set_since_last_reader_born = NoFalseNegativeVariablesSet()
 
     @property
     def committed_variables_set_since_last_reader_born(self):
@@ -73,7 +76,7 @@ class ROMVTransaction(Transaction):
 
     @committed_variables_set_since_last_reader_born.setter
     def committed_variables_set_since_last_reader_born(self, new_set):
-        assert isinstance(new_set, VariablesSet)
+        assert isinstance(new_set, NoFalseNegativeVariablesSet)
         self._committed_variables_set_since_last_reader_born = new_set
 
 
@@ -82,8 +85,18 @@ class UMVTransaction(Transaction):
         kargs['is_read_only'] = False
         super().__init__(*args, **kargs)
         self._local_written_values = dict()  # TODO: is it ok to store them on memory only?
+        self._committed_variables_latest_versions_before_update = None
+
+    @property
+    def committed_variables_latest_versions_before_update(self):
+        assert self._committed_variables_latest_versions_before_update is not None
+        return self._committed_variables_latest_versions_before_update
 
     def complete_writes(self, mv_data_manager: MultiVersionDataManager):
+        self._committed_variables_latest_versions_before_update = {
+            variable: mv_data_manager.get_latest_version_number(variable)
+            for variable in self._local_written_values.keys()
+        }
         for variable, value in self._local_written_values.items():
             mv_data_manager.write_new_version(variable, value, self.timestamp)
 
@@ -97,36 +110,65 @@ class UMVTransaction(Transaction):
 
 
 class MultiVersionGC:
-    GCJob = namedtuple('GCJob', ['variable', 'min_ts', 'max_ts'])
+    GCJob = namedtuple('GCJob', ['variables_to_check', 'from_ts', 'to_ts'])
 
-    def __init__(self, mv_data_manager: MultiVersionDataManager):
-        self._mv_data_manager = mv_data_manager
+    def __init__(self):
         self._gc_jobs_queue = []  # list of GCJob instances
-        self._committed_variables_set_since_younger_reader_born = VariablesSet()
-        pass  # TODO: impl
+        self._committed_variables_set_since_younger_reader_born = NoFalseNegativeVariablesSet()
 
     def new_read_only_transaction(self, transaction: ROMVTransaction):
         transaction.committed_variables_set_since_last_reader_born = self._committed_variables_set_since_younger_reader_born
-        self._committed_variables_set_since_younger_reader_born = VariablesSet()
-        pass  # TODO: impl
+        self._committed_variables_set_since_younger_reader_born = NoFalseNegativeVariablesSet()
+        pass  # TODO: should we do anything else here?
 
-    def _read_only_transaction_committed(self, transaction: ROMVTransaction):
-        pass  # TODO: impl
+    def _read_only_transaction_committed(self, committed_read_transaction: ROMVTransaction, scheduler):
+        older_reader = scheduler.get_read_transaction_older_than(committed_read_transaction.timestamp)
+        left_variables_set = committed_read_transaction.committed_variables_set_since_last_reader_born
+        right_variables_set = self._get_committed_variables_set_after_reader_and_before_next(committed_read_transaction,
+                                                                                             scheduler)
+        intersection = left_variables_set.intersection(right_variables_set)
 
-    # TODO: we may need the readers list to see whether there is a read transaction between the writes. how do we get it?
-    def _update_transaction_committed(self, transaction: UMVTransaction):
-        pass  # TODO: impl
+        # Remove the relevant versions (from_ts, to_ts) of the variables in the intersection!
+        # We don't remove it now, but we add it as a remove job, to the GC jobs queue.
+        from_ts = older_reader.timestamp if older_reader is not None else 0  # FIXME: is that correct?
+        to_ts = committed_read_transaction.timestamp
+        gc_job = MultiVersionGC.GCJob(variables_to_check=intersection, from_ts=from_ts, to_ts=to_ts)
+        self._gc_jobs_queue.append(gc_job)
 
-    def transaction_committed(self, transaction: Transaction):
+        # For the old versions we could not remove now, pass the responsibility to the next younger reader.
+        unhandled = left_variables_set.difference(intersection)
+        right_variables_set.add_variables(unhandled)
+
+    def _update_transaction_committed(self, committed_update_transaction: UMVTransaction, scheduler):
+        previous_versions = committed_update_transaction.committed_variables_latest_versions_before_update
+        for variable, prev_version in previous_versions.items():
+            if scheduler.are_there_read_transactions_between(prev_version, committed_update_transaction.timestamp):
+                continue
+            gc_job = MultiVersionGC.GCJob(variables_to_check={variable}, from_ts=prev_version, to_ts=prev_version)
+            self._gc_jobs_queue.append(gc_job)
+
+    def transaction_committed(self, transaction: Transaction, scheduler):
         if transaction.is_read_only:
             assert isinstance(transaction, ROMVTransaction)
-            self._read_only_transaction_committed(transaction)
+            self._read_only_transaction_committed(transaction, scheduler)
         else:
             assert isinstance(transaction, UMVTransaction)
-            self._update_transaction_committed(transaction)
+            self._update_transaction_committed(transaction, scheduler)
 
-    def run_waiting_gc_jobs(self):
-        pass  # TODO: impl
+    def run_waiting_gc_jobs(self, scheduler):
+        nr_gc_jobs = len(self._gc_jobs_queue)
+        for job_nr in range(nr_gc_jobs):
+            gc_job = self._gc_jobs_queue.pop(index=0)
+            # remove the relevant versions (from_ts, to_ts) of the variables to check!
+            for variable in gc_job.variables_to_check:
+                scheduler.mv_data_manager.delete_old_versions_in_interval(variable, gc_job.from_ts, gc_job.to_ts)
+
+    def _get_committed_variables_set_after_reader_and_before_next(self, after_reader: ROMVTransaction, scheduler):
+        older_transaction = scheduler.get_read_transaction_younger_than(after_reader.timestamp)
+        if older_transaction is None:
+            return self._committed_variables_set_since_younger_reader_born
+        assert isinstance(older_transaction, ROMVTransaction)
+        return older_transaction.committed_variables_set_since_last_reader_born
 
 
 # TODO: fully doc it!
@@ -145,6 +187,10 @@ class ROMVScheduler(Scheduler):
         self._mv_data_manager = MultiVersionDataManager()
         self._mv_gc = MultiVersionGC(self._mv_data_manager)
         self._timestamps_manager = TimestampsManager()
+
+    @property
+    def mv_data_manager(self):
+        return self._mv_data_manager
 
     def on_add_transaction(self, transaction: Transaction):
         # Assign new timestamp for RO transactions.
@@ -171,7 +217,7 @@ class ROMVScheduler(Scheduler):
                         transaction.timestamp = self._timestamps_manager.get_next_ts()
                         transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
-                    self._mv_gc.transaction_committed(transaction)  # TODO: should it be before releasing locks?
+                    self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
             assert not self._locks_manager.is_deadlock()
             self.remove_completed_transactions()  # Cannot be performed inside the loop. # TODO: remove also aborted!
 
@@ -203,6 +249,7 @@ class ROMVScheduler(Scheduler):
         if transaction.is_read_only:
             return self._mv_data_manager.read_older_version_than(variable, transaction.timestamp)
 
+        assert isinstance(transaction, UMVTransaction)
         got_lock = self._locks_manager.try_acquire_lock(transaction_id, variable, 'read')
         if got_lock == 'DEADLOCK':
             # TODO: maybe abort another transaction?
@@ -224,3 +271,13 @@ class ROMVScheduler(Scheduler):
         self.remove_transaction(transaction)  # problem: removed while iterating on the transactions list..
         transaction.abort(self)
         # TODO: undo the transaction.
+
+    def get_read_transaction_younger_than(self, ts: Timestamp):
+        pass  # TODO: impl
+
+    def get_read_transaction_older_than(self, ts: Timestamp):
+        pass  # TODO: impl
+
+    def are_there_read_transactions_between(self, min_ts: Timestamp, max_ts: Timestamp):
+        pass  # TODO: impl
+
