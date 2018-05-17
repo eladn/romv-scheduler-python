@@ -122,7 +122,7 @@ class MultiVersionGC:
         pass  # TODO: should we do anything else here?
 
     def _read_only_transaction_committed(self, committed_read_transaction: ROMVTransaction, scheduler):
-        older_reader = scheduler.get_read_transaction_older_than(committed_read_transaction.timestamp)
+        older_reader = scheduler.get_read_transaction_older_than(committed_read_transaction)
         left_variables_set = committed_read_transaction.committed_variables_set_since_last_reader_born
         right_variables_set = self._get_committed_variables_set_after_reader_and_before_next(committed_read_transaction,
                                                                                              scheduler)
@@ -142,7 +142,7 @@ class MultiVersionGC:
     def _update_transaction_committed(self, committed_update_transaction: UMVTransaction, scheduler):
         previous_versions = committed_update_transaction.committed_variables_latest_versions_before_update
         for variable, prev_version in previous_versions.items():
-            if scheduler.are_there_read_transactions_between(prev_version, committed_update_transaction.timestamp):
+            if scheduler.are_there_read_transactions_after_ts_and_before_transaction(prev_version, committed_update_transaction):
                 continue
             gc_job = MultiVersionGC.GCJob(variables_to_check={variable}, from_ts=prev_version, to_ts=prev_version)
             self._gc_jobs_queue.append(gc_job)
@@ -164,7 +164,7 @@ class MultiVersionGC:
                 scheduler.mv_data_manager.delete_old_versions_in_interval(variable, gc_job.from_ts, gc_job.to_ts)
 
     def _get_committed_variables_set_after_reader_and_before_next(self, after_reader: ROMVTransaction, scheduler):
-        older_transaction = scheduler.get_read_transaction_younger_than(after_reader.timestamp)
+        older_transaction = scheduler.get_read_transaction_younger_than(after_reader)
         if older_transaction is None:
             return self._committed_variables_set_since_younger_reader_born
         assert isinstance(older_transaction, ROMVTransaction)
@@ -276,14 +276,29 @@ class ROMVScheduler(Scheduler):
         # list sorted by transaction_id. So that the iteration in `run(..)` won't encounter
         # this transaction again until next loop (in RR scheduling scheme).
         transaction.abort(self)
-        # TODO: undo the transaction (??)
+        # TODO: Undo the transaction. We currently storing the updates locally on the transaction itself only.
 
-    def get_read_transaction_younger_than(self, ts: Timestamp):
-        pass  # TODO: impl
+    def get_read_transaction_younger_than(self, transaction: Transaction):
+        if transaction.is_read_only:
+            current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
+        else:
+            current_node = transaction.transactions_by_tid_list_node.prev_node
+        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
+            current_node = current_node.prev_node
+        return None if current_node is None else current_node.data
 
-    def get_read_transaction_older_than(self, ts: Timestamp):
-        pass  # TODO: impl
+    def get_read_transaction_older_than(self, transaction: Transaction):
+        if transaction.is_read_only:
+            current_node = transaction.ro_transactions_by_arrival_list_node.next_node
+        else:
+            current_node = transaction.transactions_by_tid_list_node.next_node
+        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
+            current_node = current_node.next_node
+        return None if current_node is None else current_node.data
 
-    def are_there_read_transactions_between(self, min_ts: Timestamp, max_ts: Timestamp):
-        pass  # TODO: impl
+    def are_there_read_transactions_after_ts_and_before_transaction(self, after_ts: Timestamp, before_transaction: Transaction):
+        reader = self.get_read_transaction_younger_than(before_transaction)
+        if reader is None:
+            return False
+        return reader.timestamp > after_ts  # FIXME: should be `>=` inequality or just `>`?
 

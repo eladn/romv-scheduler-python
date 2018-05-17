@@ -178,6 +178,10 @@ class Transaction:
         return self._is_aborted
 
     @property
+    def is_finished(self):
+        return self._is_aborted or self._is_completed
+
+    @property
     def timestamp(self):
         assert self._timestamp is not None
         return self._timestamp
@@ -291,12 +295,19 @@ class Scheduler(ABC):
         return None
 
     def _find_transaction_with_maximal_tid_lower_than(self, transaction_id):
-        return None  # TODO: impl
+        prev_transaction = None
+        for transaction in self._ongoing_transactions_by_tid:
+            if transaction.transaction_id >= transaction_id:
+                break
+            prev_transaction = transaction
+        return prev_transaction
 
     def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
         while len(self._ongoing_transactions_by_tid) > 0:
             if self._scheduling_scheme == 'RR':
                 for transaction in self._ongoing_transactions_by_tid:
+                    if transaction.is_aborted or transaction.is_completed:
+                        continue
                     yield transaction
             elif self._scheduling_scheme == 'serial':
                 transaction = self._ongoing_transactions_by_tid.peek_front()
