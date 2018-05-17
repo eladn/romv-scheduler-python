@@ -294,10 +294,16 @@ class Scheduler(ABC):
         return None  # TODO: impl
 
     def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
-        # TODO: use right iteration when the `serial` scheduling scheme has been chosen.
         while len(self._ongoing_transactions_by_tid) > 0:
-            for transaction in self._ongoing_transactions_by_tid:
-                yield transaction
+            if self._scheduling_scheme == 'RR':
+                for transaction in self._ongoing_transactions_by_tid:
+                    yield transaction
+            elif self._scheduling_scheme == 'serial':
+                transaction = self._ongoing_transactions_by_tid.peek_front()
+                if not transaction.is_completed and not transaction.is_aborted:
+                    yield transaction
+            else:
+                raise ValueError('Invalid scheduling scheme `{}`.'.format(self._scheduling_scheme))
             # Deletion cannot be performed inside the loop.
             self.remove_marked_to_remove_transactions()
 
