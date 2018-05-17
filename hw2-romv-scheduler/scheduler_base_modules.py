@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from doubly_linked_list import DoublyLinkedList
 
 OPERATION_TYPES = {'read', 'write', 'commit'}  # FIXME: do we allow `abort`?
 VARIABLE_OPERATION_TYPES = {'read', 'write'}
@@ -152,6 +153,13 @@ class Transaction:
         self._on_operation_failed_callback = on_operation_failed_callback
         # To be called after a transaction has been aborted by the scheduler.
         self._on_transaction_aborted_callback = on_transaction_aborted_callback
+        # Transactions are stored in a list, stored by arrival time.
+        # There are 3 lists: transactions list, read only transactions list, update transactions list.
+        # Each transaction stores a pointer to its own node in each list, so that given a transaction
+        # we could find efficiently the next & previous transactions.
+        self.transactions_by_tid_list_node = None
+        self.ro_transactions_by_arrival_list_node = None
+        self.u_transactions_by_arrival_list_node = None
 
     @property
     def transaction_id(self):
@@ -226,36 +234,72 @@ class Transaction:
 
 # This is a pure-abstract class. It is inherited later by the `ROMVScheduler` and the `SerialScheduler`.
 class Scheduler(ABC):
+    SchedulingSchemes = {'RR', 'serial'}
     ROTransaction = Transaction
     UTransaction = Transaction
 
-    def __init__(self):
-        self._ongoing_transactions = []
+    def __init__(self, scheduling_scheme):
+        assert(scheduling_scheme in self.SchedulingSchemes)
+        self._scheduling_scheme = scheduling_scheme
+        self._ongoing_transactions_by_tid = DoublyLinkedList()
+        self._ongoing_ro_transactions_by_arrival = DoublyLinkedList()
+        self._ongoing_u_transactions_by_arrival = DoublyLinkedList()
+        self._to_remove_transactions = DoublyLinkedList()
         self._ongoing_transactions_mapping = dict()
 
     def add_transaction(self, transaction: Transaction):
         assert not transaction.is_completed and not transaction.is_aborted
         assert transaction.transaction_id not in self._ongoing_transactions_mapping
-        self._ongoing_transactions.append(transaction)  # TODO: append in the right place!
+
+        insert_after_transaction = self._find_transaction_with_maximal_tid_lower_than(transaction.transaction_id)
+        insert_after_transaction_node = insert_after_transaction.transactions_by_tid_list_node
+        node = self._ongoing_transactions_by_tid.insert_after_node(transaction, insert_after_transaction_node)
+        transaction.transactions_by_tid_list_node = node
+
+        if transaction.is_read_only:
+            node = self._ongoing_ro_transactions_by_arrival.push_back(transaction)
+            transaction.ro_transactions_by_arrival_list_node = node
+        else:
+            node = self._ongoing_u_transactions_by_arrival.push_back(transaction)
+            transaction.u_transactions_by_arrival_list_node = node
+
         self._ongoing_transactions_mapping[transaction.transaction_id] = transaction
         self.on_add_transaction(transaction)
 
-    def remove_transaction(self, transaction: Transaction):
+    def mark_transaction_to_remove(self, transaction: Transaction):
         assert transaction.transaction_id in self._ongoing_transactions_mapping
-        assert transaction.transaction_id in self._ongoing_transactions
-        self._ongoing_transactions.remove(transaction)
+        del self._ongoing_transactions_mapping[transaction.transaction_id]
+        self._to_remove_transactions.push_back(transaction)
 
-    def remove_completed_transactions(self):
-        self._ongoing_transactions = [transaction
-                                      for transaction in self._ongoing_transactions
-                                      if not transaction.is_completed]
-        self._ongoing_transactions_mapping = {transaction.transaction_id: transaction
-                                              for transaction in self._ongoing_transactions}
+    def remove_marked_to_remove_transactions(self):
+        for transaction_to_remove in self._to_remove_transactions:
+            self.remove_transaction(transaction_to_remove)
+        self._to_remove_transactions.clear()
+
+    def remove_transaction(self, transaction_to_remove: Transaction):
+        self._ongoing_transactions_by_tid.remove_node(transaction_to_remove.transactions_by_tid_list_node)
+        if transaction_to_remove.is_read_only:
+            self._ongoing_ro_transactions_by_arrival.remove_node(transaction_to_remove.ro_transactions_by_arrival_list_node)
+        else:
+            self._ongoing_u_transactions_by_arrival.remove_node(transaction_to_remove.u_transactions_by_arrival_list_node)
+        if transaction_to_remove.transaction_id in self._ongoing_transactions_mapping:
+            del self._ongoing_transactions_mapping[transaction_to_remove.transaction_id]
 
     def get_transaction_by_id(self, transaction_id):
         if transaction_id in self._ongoing_transactions_mapping:
             return self._ongoing_transactions_mapping[transaction_id]
         return None
+
+    def _find_transaction_with_maximal_tid_lower_than(self, transaction_id):
+        return None  # TODO: impl
+
+    def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
+        # TODO: use right iteration when the `serial` scheduling scheme has been chosen.
+        while len(self._ongoing_transactions_by_tid) > 0:
+            for transaction in self._ongoing_transactions_by_tid:
+                yield transaction
+            # Deletion cannot be performed inside the loop.
+            self.remove_marked_to_remove_transactions()
 
     # Called by the user.
     @abstractmethod

@@ -64,7 +64,7 @@ class MultiVersionDataManager:
         pass  # TODO: impl
 
 
-class ROMVTransaction(Transaction):
+class ROMVTransaction(Scheduler.ROTransaction):
     def __init__(self, *args, **kargs):
         kargs['is_read_only'] = True
         super().__init__(*args, **kargs)
@@ -80,7 +80,7 @@ class ROMVTransaction(Transaction):
         self._committed_variables_set_since_last_reader_born = new_set
 
 
-class UMVTransaction(Transaction):
+class UMVTransaction(Scheduler.UTransaction):
     def __init__(self, *args, **kargs):
         kargs['is_read_only'] = False
         super().__init__(*args, **kargs)
@@ -180,12 +180,12 @@ class ROMVScheduler(Scheduler):
     SchedulingSchemes = {'RR', 'serial'}
 
     def __init__(self, scheduling_scheme):
-        super().__init__()
+        super().__init__(scheduling_scheme)
         assert scheduling_scheme in ROMVScheduler.SchedulingSchemes
         self._scheduling_scheme = scheduling_scheme
         self._locks_manager = LocksManager()
         self._mv_data_manager = MultiVersionDataManager()
-        self._mv_gc = MultiVersionGC(self._mv_data_manager)
+        self._mv_gc = MultiVersionGC()
         self._timestamps_manager = TimestampsManager()
 
     @property
@@ -203,23 +203,21 @@ class ROMVScheduler(Scheduler):
             # TODO: should we do here something for update transaction?
 
     def run(self):
-        # TODO: allow using `serial` scheduling-scheme iteration. Currently using only `RR`.
-
-        while len(self._ongoing_transactions) > 0:
-            for transaction in self._ongoing_transactions:
-                # Try execute next operation
-                transaction.try_perform_next_operation(self)
-                if transaction.is_aborted:
-                    continue
-                if transaction.is_completed:
-                    if not transaction.is_read_only:
-                        assert isinstance(transaction, UMVTransaction)
-                        transaction.timestamp = self._timestamps_manager.get_next_ts()
-                        transaction.complete_writes(self._mv_data_manager)
-                    self._locks_manager.release_all_locks(transaction.transaction_id)
-                    self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
-            assert not self._locks_manager.is_deadlock()
-            self.remove_completed_transactions()  # Cannot be performed inside the loop. # TODO: remove also aborted!
+        for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+            # Try execute next operation
+            transaction.try_perform_next_operation(self)
+            assert not self._locks_manager.is_deadlock()  # invariant
+            if transaction.is_aborted:
+                # Note: the transaction already has been marked to remove by the scheduler.
+                continue
+            if transaction.is_completed:
+                self.mark_transaction_to_remove(transaction)  # TODO: does it have to be after handling the completed transaction?
+                if not transaction.is_read_only:
+                    assert isinstance(transaction, UMVTransaction)
+                    transaction.timestamp = self._timestamps_manager.get_next_ts()
+                    transaction.complete_writes(self._mv_data_manager)
+                self._locks_manager.release_all_locks(transaction.transaction_id)
+                self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
 
     # Use the `_locks_manager`.
     def try_write(self, transaction_id, variable, value):
@@ -268,9 +266,17 @@ class ROMVScheduler(Scheduler):
 
     def abort_transaction(self, transaction: Transaction):
         self._locks_manager.release_all_locks(transaction.transaction_id)
-        self.remove_transaction(transaction)  # problem: removed while iterating on the transactions list..
+        self.mark_transaction_to_remove(transaction)  # TODO: is it ok?
+        # Notice: The call to `transaction.abort(..)` invokes the user-callback that might
+        # add a new transaction with the same transaction id as of the aborted transaction.
+        # It is ok because we already marked the aborted transaction to remove, and by side
+        # effect it has been removed from the transaction_id_to_transaction_mapping.
+        # Additionally, note that the potentially new added transaction (with the same
+        # transaction id) has been added before the aborted transaction in the transactions
+        # list sorted by transaction_id. So that the iteration in `run(..)` won't encounter
+        # this transaction again until next loop (in RR scheduling scheme).
         transaction.abort(self)
-        # TODO: undo the transaction.
+        # TODO: undo the transaction (??)
 
     def get_read_transaction_younger_than(self, ts: Timestamp):
         pass  # TODO: impl
