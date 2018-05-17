@@ -2,7 +2,6 @@ from collections import namedtuple
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager, NoFalseNegativeVariablesSet
 
 
-# Invariant: at any point in time, there is no cycle in the "wait-for" graph.
 class DeadlockDetector:
     def __init__(self):
         self._wait_for_graph = None  # TODO: create a new directed graph (using networx lib).
@@ -109,44 +108,119 @@ class UMVTransaction(Scheduler.UTransaction):
         return self._local_written_values[variable]
 
 
+# The basic intuition is to evict the versions that no one would potentially need in
+# the future. An update transaction may need only the latest version of any variable.
+# But a read-only transaction may need the latest version since the transaction has
+# born. We have to somehow keep track (efficiently) of versions and may need it in
+# the future, so we could conservatively detect versions that no-one may need and evict
+# it. Here we explain how the `MultiVersionGC` does it. Dealing wit updaters is simpler,
+# so we explain it afterwards.
+# Each ongoing read-only transaction holds a set of variables that has been committed
+# (by an update transaction) before that reader has born, but after the youngest older
+# reader has been born. So that, in each interval of time between the birth of each pair
+# of consecutive read-only transactions, the youngest one holds a set of all the variables
+# that has been committed in that interval of time. This makes that reader "responsible"
+# for these versions in some sense. When a reader commits (and effectively ends its life),
+# it should check whether the versions it is responsible for can be evicted. If so, it
+# makes sure to delete these no-more-necessary versions. If some of these versions cannot
+# get evicted (because another younger reader might need it or it is the latest version),
+# the just-committed-reader should pass the responsibility for these versions to the oldest
+# younger reader, as the just-committed-reader had never existed at all. Notice that a
+# reader may access variables that has been committed in each one of the time-intervals
+# that are older than the birth of that reader. Including its own interval, but also
+# older ones.
+# Practically, when an updater commits, it is still unknown which is the younger reader
+# that is older than the just-committed-updater (because it would be born in the future).
+# So we don't know in which set to store this variable. In order to deal with it, we
+# keep a "global" set of variables, stored under the GC instance. When a new reader is
+# born, this "global" set is assigned to that reader, and a new empty set it created
+# and stored under this GC "global" pointer. It semantically means - variables that has
+# been committed after the corrently-youngest reader has been born.
+# About updaters: When an update transaction commits, it checks whether there exists
+# a reader that has born before the commit, but after the former version (of the same
+# variable) has been committed. If so, this reader is responsible for the old version
+# and we should do nothing. Otherwise, there exists no reader that is responsible for
+# the former version. In that case, we should make sure to evict it when the updater
+# commits. There exists no reader that needs this version, and there will be no such,
+# because new readers would read the just-committed-version or newer one.
+# GC jobs:
+# The GC is informed each time a transaction is committed. When the GC informed about a
+# committed transaction, it checks about versions that can be evicted, as described below.
+# When the GC encounters a version that has to be evicted, it does not actually perform
+# the eviction. The eviction details are stored as a GC "job", in a dedicated gc-jobs-
+# queue. Then, when the scheduler decides, it can offline call to `run_waiting_gc_jobs()`
+# to perform the waiting previously registered evictions. The actual eviction application
+# performs disk accesses. The idea is to avoid blocking the scheduler in favor of
+# accessing the disk to perform GC evictions.
 class MultiVersionGC:
     GCJob = namedtuple('GCJob', ['variables_to_check', 'from_ts', 'to_ts'])
 
     def __init__(self):
-        self._gc_jobs_queue = []  # list of GCJob instances
+        # List of GCJob instances. Eviction jobs waiting to be performed.
+        # The actual eviction is perform by `run_waiting_gc_jobs()`, but
+        # the versions to evict are registered during the scheduler iterations.
+        self._gc_jobs_queue = []
+        # This set stores all of the variables that has been committed by an update
+        # transaction, since the younger read-only-transaction has born. When the
+        # next reader will be born, this set will be assigned to that reader, and
+        # a new empty set will be assigned to this pointer instead of the former one.
         self._committed_variables_set_since_younger_reader_born = NoFalseNegativeVariablesSet()
 
+    # Called by the scheduler each time a new read-only transaction is born.
     def new_read_only_transaction(self, transaction: ROMVTransaction):
         transaction.committed_variables_set_since_last_reader_born = self._committed_variables_set_since_younger_reader_born
         self._committed_variables_set_since_younger_reader_born = NoFalseNegativeVariablesSet()
-        pass  # TODO: should we do anything else here?
+        # TODO: should we do anything else here?
 
     def _read_only_transaction_committed(self, committed_read_transaction: ROMVTransaction, scheduler):
+        # ####################### | ------------------------------- | ##########################
+        #  Youngest-Older-Reader  |  Time interval between readers  |  Current-Committed-Reader
+        #                         |  The responsibility area of the |
+        #                         |  current committed reader       |
+        #                         |     { left variables set }      |
         older_reader = scheduler.get_read_transaction_older_than(committed_read_transaction)
         left_variables_set = committed_read_transaction.committed_variables_set_since_last_reader_born
         right_variables_set = self._get_committed_variables_set_after_reader_and_before_next(committed_read_transaction,
                                                                                              scheduler)
-        intersection = left_variables_set.intersection(right_variables_set)
 
-        # Remove the relevant versions (from_ts, to_ts) of the variables in the intersection!
-        # We don't remove it now, but we add it as a remove job, to the GC jobs queue.
+        # This is the time-span of the responsibility of the just-committed-reader.
+        # Reminder: The responsibility time is from the birth of youngest-older reader,
+        #           and until the birth of the just-committed-reader.
         from_ts = older_reader.timestamp if older_reader is not None else 0  # FIXME: is that correct?
         to_ts = committed_read_transaction.timestamp
+
+        # This is the set of variables that has been committed in the responsibility
+        # time-span of the just-committed-reader and also committed in the responsibility
+        # time-span of the next younger reader. It means that now no reader needs them.
+        intersection = left_variables_set.intersection(right_variables_set)
+
+        # Register the relevant versions (from_ts, to_ts) of the variables in the intersection for eviction.
+        # We don't evict it now, but we add it as a GC eviction job, to the GC eviction jobs queue.
         gc_job = MultiVersionGC.GCJob(variables_to_check=intersection, from_ts=from_ts, to_ts=to_ts)
         self._gc_jobs_queue.append(gc_job)
 
         # For the old versions we could not remove now, pass the responsibility to the next younger reader.
+        # These versions would be eventually in the responsibility time-span of a reader that will evict
+        # them when it commits.
         unhandled = left_variables_set.difference(intersection)
         right_variables_set.add_variables(unhandled)
 
     def _update_transaction_committed(self, committed_update_transaction: UMVTransaction, scheduler):
         previous_versions = committed_update_transaction.committed_variables_latest_versions_before_update
         for variable, prev_version in previous_versions.items():
-            if scheduler.are_there_read_transactions_after_ts_and_before_transaction(prev_version, committed_update_transaction):
+            if scheduler.are_there_read_transactions_after_ts_and_before_transaction(prev_version,
+                                                                                     committed_update_transaction):
+                # If there exists a read-only transaction younger than the new committed version, but older
+                # then the previous version (of the current examined variable), than that reader is responsible
+                # for that previous version, and we should do nothing here.
                 continue
+            # We revealed that there is no reader that is responsible for the previous version of that variable.
+            # New readers would be responsible for the new-just-created version. So the previous version can
+            # be evicted. Hence, we add it as a GC eviction job.
             gc_job = MultiVersionGC.GCJob(variables_to_check={variable}, from_ts=prev_version, to_ts=prev_version)
             self._gc_jobs_queue.append(gc_job)
 
+    # Called by the scheduler each time a transaction is committed.
     def transaction_committed(self, transaction: Transaction, scheduler):
         if transaction.is_read_only:
             assert isinstance(transaction, ROMVTransaction)
@@ -206,7 +280,11 @@ class ROMVScheduler(Scheduler):
         for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
             # Try execute next operation
             transaction.try_perform_next_operation(self)
-            assert not self._locks_manager.is_deadlock()  # invariant
+            # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
+            #            Each time a transaction attempts to lock a variable, the conflict graph
+            #            is updated. When a conflict cycle is firstly created it is immediately
+            #            detected and then immediately broken by the scheduler.
+            assert not self._locks_manager.is_deadlock()
             if transaction.is_aborted:
                 # Note: the transaction already has been marked to remove by the scheduler.
                 continue
@@ -228,6 +306,10 @@ class ROMVScheduler(Scheduler):
 
         got_lock = self._locks_manager.try_acquire_lock(transaction_id, variable, 'write')
         if got_lock == 'DEADLOCK':
+            # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
+            #            Each time a transaction attempts to lock a variable, the conflict graph
+            #            is updated. When a conflict cycle is firstly created it is immediately
+            #            detected and then immediately broken by the scheduler.
             # TODO: maybe abort another transaction?
             self.abort_transaction(transaction)  # FIXME: is it ok to call it here?
             assert not self._locks_manager.is_deadlock()
@@ -245,11 +327,16 @@ class ROMVScheduler(Scheduler):
         transaction = self.get_transaction_by_id(transaction_id)
         assert transaction is not None
         if transaction.is_read_only:
+            assert isinstance(transaction, ROMVTransaction)
             return self._mv_data_manager.read_older_version_than(variable, transaction.timestamp)
 
         assert isinstance(transaction, UMVTransaction)
         got_lock = self._locks_manager.try_acquire_lock(transaction_id, variable, 'read')
         if got_lock == 'DEADLOCK':
+            # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
+            #            Each time a transaction attempts to lock a variable, the conflict graph
+            #            is updated. When a conflict cycle is firstly created it is immediately
+            #            detected and then immediately broken by the scheduler.
             # TODO: maybe abort another transaction?
             self.abort_transaction(transaction)  # FIXME: is it ok to call it here?
             assert not self._locks_manager.is_deadlock()
