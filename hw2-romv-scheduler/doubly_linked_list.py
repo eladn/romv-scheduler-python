@@ -1,13 +1,11 @@
 
 class DoublyLinkedList:
     class Node:
-        def __init__(self, in_list, data, prev_node, next_node):
+        def __init__(self, in_list, data, prev_node=None, next_node=None):
             self.in_list = in_list
             self.data = data
             self.prev_node = prev_node
             self.next_node = next_node
-            self.currently_iterators_over = 0
-            self.removed = False
 
     def __init__(self):
         self.first = None
@@ -81,12 +79,10 @@ class DoublyLinkedList:
 
     def remove_node(self, node: Node):
         assert(node.in_list == self)
-        node.removed = True
         self.count -= 1
-        if node.currently_iterators_over == 0:
-            self._unsafe_detach_node(node)
+        self._detach_node(node)
 
-    def _unsafe_detach_node(self, node):
+    def _detach_node(self, node):
         if node.prev_node is not None:
             node.prev_node.next_node = node.next_node
         else:
@@ -111,29 +107,8 @@ class DoublyLinkedList:
     def __iter__(self):
         current_node = self.first
         while current_node is not None:
-            current_node.currently_iterators_over += 1
             yield current_node.data
-            prev_node = current_node
             current_node = current_node.next_node
-            prev_node.currently_iterators_over -= 1
-            if prev_node.removed and prev_node.currently_iterators_over == 0:
-                self._unsafe_detach_node(prev_node)
-
-
-    def __iter2__(self):
-        # lets Python know this class is iterable
-        return self
-
-    def next(self):
-        # provides things iterating over class with next element
-        if self.current is None:
-            # allows us to re-iterate
-            self.current = self.first
-            raise StopIteration
-        else:
-            result = self.current.data
-            self.current = self.current.next_node
-            return result
 
     def __len__(self):
         return self.count
