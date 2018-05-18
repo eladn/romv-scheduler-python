@@ -25,11 +25,17 @@ if __name__ == '__main__':
     # Parse all input (optional) arguments for the scripts.
     args = args_parser()
 
-    # The simulator is responsible for
+    # The simulator is responsible for reading the workload test file and injecting the
+    # transactions into the scheduler. For each transaction, the simulator simulates an
+    # execution of the user program that manages this transaction. It means that values
+    # that are retrieved using read-operations might be stored temporarily in local
+    # variables of the program, and might be used later for as a value to write in a
+    # write-operation. The simulator is also responsible for restarting a transaction
+    # that ahs been aborted by the scheduler (due to a deadlock).
     simulator = TransactionsWorkloadSimulator()
 
-    # Parse the test file and add its contents to the simulator.
-    simulator.load_test_data(workload_data_filename=args.test)
+    # Parse the workload test file and add its contents to the simulator.
+    simulator.load_test_data(args.test)
 
     # Initialize the relevant scheduler.
     # By default use the scheduling scheme mentioned in the test file.
@@ -38,7 +44,7 @@ if __name__ == '__main__':
     if args.sched:
         schedule_scheme = args.sched
     scheduler_type = ROMVScheduler if schedule_scheme == 'RR' else SerialScheduler
-    scheduler = scheduler_type()
+    scheduler = scheduler_type(schedule_scheme)
 
     # Firstly, completely run the first transaction (T0), to fill the variables with some initial value.
     simulator.add_initialization_transaction_to_scheduler(scheduler)
