@@ -1,5 +1,6 @@
 from collections import namedtuple
-from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager, NoFalseNegativeVariablesSet
+from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
+    NoFalseNegativeVariablesSet, Timespan
 
 
 class DeadlockDetector:
@@ -47,19 +48,34 @@ class MultiVersionDataManager:
         # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
         pass  # TODO: impl
 
+    # Returns `None` if there wasn't any write to this variable yet.
     def read_older_version_than(self, variable, max_ts: Timestamp):
         pass  # TODO: impl
 
     def write_new_version(self, variable, new_value, ts: Timestamp):
         pass  # TODO: impl
 
+    # Returns `None` if there wasn't any write to this variable yet.
     def get_latest_version_number(self, variable):
         pass  # TODO: impl
 
+    # Returns `None` if there wasn't any write to this variable yet.
     def read_latest_version(self, variable):
         pass  # TODO: impl
 
-    def delete_old_versions_in_interval(self, variable, from_ts: Timestamp, to_ts: Timestamp):
+    # This method is used by the GC eventual eviction mechanism.
+    # Removes versions of the given variable that are inside of the given timespan
+    # `remove_versions_in_timespan`, but do so only if the promised newer versions
+    # exists. We check for existence of the promised newer versions it in order to
+    # support using `NoFalseNegativeVariablesSet` for the GC mechanism. We elaborate
+    # about it under the GC implementation.
+    # Returns a boolean tuple - (bool,bool)
+    #   The 1st bool: whether the version to remove has been found.
+    #   The 2nd bool: whether the promised newer version has been found.
+    #   The caller may assume the versions to remove has been removed iff both are true.
+    def delete_old_versions_in_interval(self, variable,
+                                        remove_versions_in_timespan: Timespan,
+                                        promised_newer_version_in_timespan: Timespan):
         pass  # TODO: impl
 
 
@@ -104,9 +120,13 @@ class UMVTransaction(Scheduler.UTransaction):
     # Called by the scheduler after the transaction commits, in order to store to
     # disk the updates that have been made by this transaction, as new versions.
     def complete_writes(self, mv_data_manager: MultiVersionDataManager):
+        # Find the currently latest versions for each variable that the transaction
+        # writes to, except for the variables that are written in the first time in
+        # the database (the method `get_latest_version_number()` returns None for these).
         self._committed_variables_latest_versions_before_update = {
             variable: mv_data_manager.get_latest_version_number(variable)
             for variable in self._local_written_values.keys()
+            if mv_data_manager.get_latest_version_number(variable) is not None
         }
         for variable, value in self._local_written_values.items():
             mv_data_manager.write_new_version(variable, value, self.timestamp)
@@ -149,7 +169,7 @@ class UMVTransaction(Scheduler.UTransaction):
 # keep a "global" set of variables, stored under the GC instance. When a new reader is
 # born, this "global" set is assigned to that reader, and a new empty set it created
 # and stored under this GC "global" pointer. It semantically means - variables that has
-# been committed after the corrently-youngest reader has been born.
+# been committed after the currently-youngest reader has been born.
 # About updaters: When an update transaction commits, it checks whether there exists
 # a reader that has born before the commit, but after the former version (of the same
 # variable) has been committed. If so, this reader is responsible for the old version
@@ -157,7 +177,7 @@ class UMVTransaction(Scheduler.UTransaction):
 # the former version. In that case, we should make sure to evict it when the updater
 # commits. There exists no reader that needs this version, and there will be no such,
 # because new readers would read the just-committed-version or newer one.
-# GC jobs:
+# GC-eviction-jobs:
 # The GC is informed each time a transaction is committed. When the GC informed about a
 # committed transaction, it checks about versions that can be evicted, as described below.
 # When the GC encounters a version that has to be evicted, it does not actually perform
@@ -166,8 +186,29 @@ class UMVTransaction(Scheduler.UTransaction):
 # to perform the waiting previously registered evictions. The actual eviction application
 # performs disk accesses. The idea is to avoid blocking the scheduler in favor of
 # accessing the disk to perform GC evictions.
+# Some notes about the variables set data structure in a real-life case:
+# In a certain point in time, all of the variable names in the database would appear in
+# the global set `_committed_variables_set_since_younger_reader_born`. We assume that
+# in real-life case, a space-efficient data structure can be used here. We can use the
+# fact that we only relay on the No-False-Negative property of our VariablesSet. This is
+# because the GC-eviction-job only tells us on what variables and in what time-span we
+# should check for existence in the disk. It is ok if sometimes when we ask the set for
+# existence of a variable in the set, the set would answer "yes" despite the variable does
+# not exist there. If such version does not exist we would see it when we search for it
+# on the disk. From the way our suggested tracking mechanism works, it is promissed we
+# will never evict a version that might be used by another transaction. We just want to know
+# where to search for to avoid searching the whole disk. For example the bloom-filter data
+# structure might be used as a variables set. In that case, we could not just iterate
+# throughout all of the variables in the set, as we do now in the method `run_waiting_gc_jobs()`,
+# because the hashing is (in a way) "one-way function". Instead, we could think of two
+# "removal-trigger" types: The first is coarse - When a variable is encountered in the system,
+# check the GC whether this variable is contained in a GC-eviction-job, and evict it. The second
+# is fined-grained - Periodically iterate over all the variables in the system and for each
+# one check for its existence in each waiting GC-eviction-job.
 class MultiVersionGC:
-    GCJob = namedtuple('GCJob', ['variables_to_check', 'from_ts', 'to_ts'])
+    GCJob = namedtuple('GCJob', ['variables_to_check',
+                                 'remove_versions_in_timespan',
+                                 'promised_newer_version_in_timespan'])
 
     def __init__(self):
         # List of GCJob instances. Eviction jobs waiting to be performed.
@@ -187,21 +228,21 @@ class MultiVersionGC:
         # TODO: should we do anything else here?
 
     def _read_only_transaction_committed(self, committed_read_transaction: ROMVTransaction, scheduler):
-        # ####################### | ------------------------------- | ##########################
-        #  Youngest-Older-Reader  |  Time interval between readers  |  Current-Committed-Reader
-        #                         |  The responsibility area of the |
-        #                         |  current committed reader       |
-        #                         |     { left variables set }      |
-        older_reader = scheduler.get_read_transaction_older_than(committed_read_transaction)
+        # Hierarchic order of mentioned items:
+        # ######### | ------------------------------- | ########## | ------------------------------- | ####### |
+        #  Youngest |  Time interval between readers  |  Current   | Time interval between readers   | Oldest  |
+        #  Older    |  The responsibility area of the |  Committed | The responsibility area of the  | Younger |
+        #  Reader   |  current committed reader       |  Reader    | oldest younger reader if exists | Reader  |
+        #  Birth    |     { left variables set }      |  Birth     |     { right variables set }     | Birth   |
         left_variables_set = committed_read_transaction.committed_variables_set_since_last_reader_born
-        right_variables_set = self._get_committed_variables_set_after_reader_and_before_next(committed_read_transaction,
-                                                                                             scheduler)
+        right_variables_set, right_reader_responsibility_timespan = self._get_committed_variables_set_after_reader_and_before_next(
+            committed_read_transaction, scheduler)
 
         # This is the time-span of the responsibility of the just-committed-reader.
         # Reminder: The responsibility time is from the birth of youngest-older reader,
         #           and until the birth of the just-committed-reader.
-        from_ts = older_reader.timestamp if older_reader is not None else 0  # FIXME: is that correct?
-        to_ts = committed_read_transaction.timestamp
+        committed_reader_responsibility_timespan = self._get_responsibility_timespan_of_read_transaction(
+            committed_read_transaction, scheduler)
 
         # This is the set of variables that has been committed in the responsibility
         # time-span of the just-committed-reader and also committed in the responsibility
@@ -210,7 +251,9 @@ class MultiVersionGC:
 
         # Register the relevant versions (from_ts, to_ts) of the variables in the intersection for eviction.
         # We don't evict it now, but we add it as a GC eviction job, to the GC eviction jobs queue.
-        gc_job = MultiVersionGC.GCJob(variables_to_check=intersection, from_ts=from_ts, to_ts=to_ts)
+        gc_job = MultiVersionGC.GCJob(variables_to_check=intersection,
+                                      remove_versions_in_timespan=committed_reader_responsibility_timespan,
+                                      promised_newer_version_in_timespan=right_reader_responsibility_timespan)
         self._gc_jobs_queue.append(gc_job)
 
         # For the old versions we could not remove now, pass the responsibility to the next younger reader.
@@ -231,7 +274,12 @@ class MultiVersionGC:
             # We revealed that there is no reader that is responsible for the previous version of that variable.
             # New readers would be responsible for the new-just-created version. So the previous version can
             # be evicted. Hence, we add it as a GC eviction job.
-            gc_job = MultiVersionGC.GCJob(variables_to_check={variable}, from_ts=prev_version, to_ts=prev_version)
+            remove_versions_in_timespan = Timespan(from_ts=prev_version, to_ts=prev_version)
+            promised_newer_version_in_timespan = Timespan(from_ts=committed_update_transaction.timestamp,
+                                                          to_ts=committed_update_transaction.timestamp)
+            gc_job = MultiVersionGC.GCJob(variables_to_check={variable},
+                                          remove_versions_in_timespan=remove_versions_in_timespan,
+                                          promised_newer_version_in_timespan=promised_newer_version_in_timespan)
             self._gc_jobs_queue.append(gc_job)
 
     # Called by the scheduler each time a transaction is committed.
@@ -247,16 +295,46 @@ class MultiVersionGC:
         nr_gc_jobs = len(self._gc_jobs_queue)
         for job_nr in range(nr_gc_jobs):
             gc_job = self._gc_jobs_queue.pop(index=0)
-            # remove the relevant versions (from_ts, to_ts) of the variables to check!
+            # remove the relevant versions (in the timespan to remove) of the variables to check!
             for variable in gc_job.variables_to_check:
-                scheduler.mv_data_manager.delete_old_versions_in_interval(variable, gc_job.from_ts, gc_job.to_ts)
+                versions_to_remove_exist, promised_newer_versions_exist = \
+                    scheduler.mv_data_manager.delete_old_versions_in_interval(
+                    variable, gc_job.remove_versions_in_timespan, gc_job.promised_newer_version_in_timespan)
+                if versions_to_remove_exist and not promised_newer_versions_exist:
+                    # It might happen because we use No-False-Negatives set.
+                    # So a false positive might happen for the "right-variables-set"
+                    # (see method _read_only_transaction_committed to understand notation)
+                    # TODO: impl. handle it! add it to another reader responsibility or remove it.
+                    # We didn't handled this case because we currently use naive variables-set implementation,
+                    # that has neither FP nor FN. In real-life case it can be handled here, by finding
+                    # another reader to pass this responsibility to, or if there is no such a reader, just
+                    # remove this version now anyway if it is not the latest. In that case, the readers have
+                    # to be stored in a tree rather than a list, in order to efficiently search there.
+                    # Alternatively these ones can be added to a dedicated list of coarse-eviction, that is
+                    # being checked periodically for eviction, less efficient than the main mechanism. This
+                    # handling is possible because we may assume a certain expected ratio of false-positives.
+                    assert False
+
+    def _get_responsibility_timespan_of_read_transaction(self, read_transaction: ROMVTransaction, scheduler):
+        # Reminder: The responsibility time-span of reader A is from the birth of the
+        #           youngest-older reader (born before A), and until the birth of reader A.
+        older_reader = scheduler.get_read_transaction_older_than(read_transaction)
+        responsibility_from_ts = older_reader.timestamp if older_reader is not None else 0  # FIXME: is that correct?
+        responsibility_to_ts = read_transaction.timestamp
+        responsibility_timespan = Timespan(from_ts=responsibility_from_ts,
+                                           to_ts=responsibility_to_ts)
+        return responsibility_timespan
 
     def _get_committed_variables_set_after_reader_and_before_next(self, after_reader: ROMVTransaction, scheduler):
-        older_transaction = scheduler.get_read_transaction_younger_than(after_reader)
-        if older_transaction is None:
-            return self._committed_variables_set_since_younger_reader_born
-        assert isinstance(older_transaction, ROMVTransaction)
-        return older_transaction.committed_variables_set_since_last_reader_born
+        younger_transaction = scheduler.get_read_transaction_younger_than(after_reader)
+        if younger_transaction is None:
+            responsibility_timespan = Timespan(from_ts=after_reader.timestamp,
+                                               to_ts=scheduler.get_current_ts())
+            return self._committed_variables_set_since_younger_reader_born, responsibility_timespan
+        assert isinstance(younger_transaction, ROMVTransaction)
+        responsibility_timespan = self._get_responsibility_timespan_of_read_transaction(younger_transaction, scheduler)
+        assert responsibility_timespan.from_ts == after_reader.timestamp
+        return younger_transaction.committed_variables_set_since_last_reader_born, responsibility_timespan
 
 
 # TODO: fully doc it!
@@ -289,6 +367,9 @@ class ROMVScheduler(Scheduler):
         else:
             assert isinstance(transaction, UMVTransaction)
             # TODO: should we do here something for update transaction?
+
+    def get_current_ts(self):
+        return self._timestamps_manager.peek_next_ts()
 
     # TODO: doc!
     def run(self):
@@ -367,6 +448,7 @@ class ROMVScheduler(Scheduler):
             return value
         return self._mv_data_manager.read_latest_version(variable)
 
+    # TODO: doc!
     def abort_transaction(self, transaction: Transaction):
         self._locks_manager.release_all_locks(transaction.transaction_id)
         self.mark_transaction_to_remove(transaction)  # TODO: is it ok?

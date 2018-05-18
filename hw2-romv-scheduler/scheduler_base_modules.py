@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from doubly_linked_list import DoublyLinkedList
 
 OPERATION_TYPES = {'read', 'write', 'commit'}  # FIXME: do we allow `abort`?
@@ -113,6 +114,7 @@ class CommitOperation(Operation):
 
 # We could create our own type. In real life case, we should create our own type so it would deal with overflows.
 Timestamp = int
+Timespan = namedtuple('Timespan', ['from_ts', 'to_ts'])
 
 
 class TimestampsManager:
@@ -122,6 +124,9 @@ class TimestampsManager:
     def get_next_ts(self):
         self._last_timestamp += 1
         return self._last_timestamp
+
+    def peek_next_ts(self):
+        return self._last_timestamp + 1
 
 
 # Transaction is the API between the scheduler and the user.
@@ -427,8 +432,13 @@ class Scheduler(ABC):
         ...
 
 
-# TODO: doc!
-# Notice: we could use a bloom-filter here. # TODO: elaborate on it.
+# For the GC mechanism we sometimes have to store a set of variables. We see later
+# why and how we do it. The catch is that we only relay on the No-False-Negative
+# property of that variables set. Here we just show a naive implementation of such
+# set data structure. In real-life we might want to use a more space-efficient data
+# structure instead. The bloom-filter data structure is an example for one. More
+# details about it under the documentation of the garbage-collector implementation
+# (in "romv_scheduler.py").
 class NoFalseNegativeVariablesSet:
     def __init__(self):
         self._variables_set = set()
