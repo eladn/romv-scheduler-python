@@ -389,7 +389,7 @@ class ROMVScheduler(Scheduler):
         if transaction.is_read_only:
             current_node = transaction.ro_transactions_by_arrival_list_node.next_node
         else:
-            current_node = transaction.transactions_by_tid_list_node.next_node
+            current_node = transaction.transactions_by_arrival_list_node.next_node
         while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
             current_node = current_node.next_node
         return None if current_node is None else current_node.data
@@ -402,7 +402,7 @@ class ROMVScheduler(Scheduler):
         if transaction.is_read_only:
             current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
         else:
-            current_node = transaction.transactions_by_tid_list_node.prev_node
+            current_node = transaction.transactions_by_arrival_list_node.prev_node
         while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
             current_node = current_node.prev_node
         return None if current_node is None else current_node.data

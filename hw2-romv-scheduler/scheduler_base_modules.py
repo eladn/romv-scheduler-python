@@ -143,21 +143,27 @@ class Transaction:
                  on_transaction_aborted_callback=None):
         self._transaction_id = transaction_id
         self._is_read_only = is_read_only
-        self._waiting_operations_queue = []
+        self._waiting_operations_queue = []  # list of instances of `Operation`.
         self._is_completed = False
         self._is_aborted = False
         self._timestamp = None
+
         # To be called after an operation has been completed.
         self._on_operation_complete_callback = on_operation_complete_callback
         # To be called after an operation has failed (and now waiting till next attempt) due to locks.
         self._on_operation_failed_callback = on_operation_failed_callback
         # To be called after a transaction has been aborted by the scheduler.
         self._on_transaction_aborted_callback = on_transaction_aborted_callback
-        # Transactions are stored in a list, stored by arrival time.
-        # There are 3 lists: transactions list, read only transactions list, update transactions list.
+
+        # Transactions are stored in a list, stored by transaction id, so that the scheduler can
+        # iterate over the transactions by the order of their transaction id.
+        # Besides the above mentioned list, there are also 3 other lists sorted by arrival time:
+        #   (1) all transactions list ; (2) read-only transactions list ; (3) update transactions list.
         # Each transaction stores a pointer to its own node in each list, so that given a transaction
-        # we could find efficiently the next & previous transactions.
+        # we could find efficiently the next & previous transactions in each list the transaction
+        # belongs to.
         self.transactions_by_tid_list_node = None
+        self.transactions_by_arrival_list_node = None
         self.ro_transactions_by_arrival_list_node = None
         self.u_transactions_by_arrival_list_node = None
 
@@ -237,6 +243,23 @@ class Transaction:
 
 
 # This is a pure-abstract class. It is inherited later by the `ROMVScheduler` and the `SerialScheduler`.
+# The `Scheduler` include basic generic methods for storing the transactions in lists and iterating
+# over them. The `Scheduler` defined an interface, so that any actual scheduler that inherits from
+# `Scheduler` must conform with that interface. Any scheduler must implement the methods:
+#   run()
+#       It iterates over that transactions and tries to perform their first awaiting operation.
+#       The method `iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions()`
+#       of the scheduler might be handy here.
+#   try_write(transaction_id, variable, value)
+#       When the scheduler tries to perform a "write" operation (of a transaction), the operation
+#       receives a pointer to the scheduler. The method `operation.try_perform(scheduler)` might
+#       call the method `scheduler.try_write(..)`. This method might succeed of fail. If it fails
+#       it means it couldn't acquire the necessary locks for that transactions, and the operation
+#       should wait until these desired locks will be released. That mechanism allows the scheduler
+#       to enforce its own locking mechanism.
+#   try_read(transaction_id, variable)
+#       Similar to the explanation above. Except that here the scheduler might choose to handle
+#       differently read-only transactions.
 class Scheduler(ABC):
     SchedulingSchemes = {'RR', 'serial'}
     ROTransaction = Transaction
@@ -246,13 +269,21 @@ class Scheduler(ABC):
         assert(scheduling_scheme in self.SchedulingSchemes)
         # TODO: doc!
         self._scheduling_scheme = scheduling_scheme
-        # TODO: doc!
+
+        # Transactions are stored in a list, stored by transaction id, so that the scheduler can
+        # iterate over the transactions by the order of their transaction id.
         self._ongoing_transactions_by_tid = DoublyLinkedList()
-        # TODO: doc!
+
+        # Besides the above mentioned list, there are also 3 other lists sorted by arrival time:
+        #   (1) all transactions list ; (2) read-only transactions list ; (3) update transactions list.
+        # These lists will be used for garbage-collection operations.
+        self._ongoing_transactions_by_arrival = DoublyLinkedList()
         self._ongoing_ro_transactions_by_arrival = DoublyLinkedList()
         self._ongoing_u_transactions_by_arrival = DoublyLinkedList()
+
         # TODO: doc!
         self._to_remove_transactions = DoublyLinkedList()
+
         # TODO: doc!
         self._ongoing_transactions_mapping = dict()
 
@@ -265,6 +296,9 @@ class Scheduler(ABC):
         insert_after_transaction_node = insert_after_transaction.transactions_by_tid_list_node
         node = self._ongoing_transactions_by_tid.insert_after_node(transaction, insert_after_transaction_node)
         transaction.transactions_by_tid_list_node = node
+
+        node = self._ongoing_transactions_by_arrival.push_back(transaction)
+        transaction.transactions_by_arrival_list_node = node
 
         if transaction.is_read_only:
             node = self._ongoing_ro_transactions_by_arrival.push_back(transaction)
@@ -293,6 +327,7 @@ class Scheduler(ABC):
     # TODO: doc!
     def remove_transaction(self, transaction_to_remove: Transaction):
         self._ongoing_transactions_by_tid.remove_node(transaction_to_remove.transactions_by_tid_list_node)
+        self._ongoing_transactions_by_arrival.remove_node(transaction_to_remove.transactions_by_arrival_list_node)
         if transaction_to_remove.is_read_only:
             self._ongoing_ro_transactions_by_arrival.remove_node(transaction_to_remove.ro_transactions_by_arrival_list_node)
         else:
@@ -305,7 +340,9 @@ class Scheduler(ABC):
             return self._ongoing_transactions_mapping[transaction_id]
         return None
 
-    # TODO: doc!
+    # When adding a new transaction, we want to inset it inside of the ongoing transactions list
+    # sorted by tid, in the right position. In order to do so, we need to find this correct position.
+    # This method help us finding this position in the list to insert after it.
     def _find_transaction_with_maximal_tid_lower_than(self, transaction_id):
         prev_transaction = None
         for transaction in self._ongoing_transactions_by_tid:
@@ -314,7 +351,19 @@ class Scheduler(ABC):
             prev_transaction = transaction
         return prev_transaction
 
-    # TODO: doc!
+    # This is a generator function. It returns an iterator. The returned iterator yields a
+    # a transaction in each iteration. The iterator is fulfilled when no more ongoing
+    # transactions exist. The iteration scheme can be either 'RR' (round-robin) based, or
+    # serial based. It is determined by the scheduling-scheme that is set in the c'tor.
+    # It should be used in the implementation of the method "run()", where it is needed to
+    # iterate over the ongoing transactions by their transaction id and try to perform their
+    # awaiting operations, until no more active transactions remains.
+    # Usage example: `for transaction in self.iterate_over_transactions_...(): <for loop body>`
+    # Notice that while the iteration the scheduler might decide to remove a transaction (if it
+    # commits or aborts). However, it is not safe to remove the transaction from the list while
+    # iterating over it. We solve this issue by only marking the transaction as "to be removed",
+    # while iterating over the list. Later, in the end of each loop over the transactions, we
+    # here perform the actual removal by calling `remove_marked_to_remove_transactions()`.
     def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
         while len(self._ongoing_transactions_by_tid) > 0:
             if self._scheduling_scheme == 'RR':
@@ -328,7 +377,9 @@ class Scheduler(ABC):
                     yield transaction
             else:
                 raise ValueError('Invalid scheduling scheme `{}`.'.format(self._scheduling_scheme))
-            # Deletion cannot be performed inside the loop.
+            # Deletion cannot be performed inside the iteration over the transactions list.
+            # Hence, we only mark transactions for deletion while iterating, and on the end
+            # of each outer loop we remove all of the transaction that are marked to be removed.
             self.remove_marked_to_remove_transactions()
 
     # Called by the user.
