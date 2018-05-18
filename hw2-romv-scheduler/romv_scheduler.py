@@ -290,6 +290,7 @@ class ROMVScheduler(Scheduler):
             assert isinstance(transaction, UMVTransaction)
             # TODO: should we do here something for update transaction?
 
+    # TODO: doc!
     def run(self):
         for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
             # Try execute next operation
@@ -311,7 +312,7 @@ class ROMVScheduler(Scheduler):
                 self._locks_manager.release_all_locks(transaction.transaction_id)
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
 
-    # Use the `_locks_manager`.
+    # TODO: doc!
     def try_write(self, transaction_id, variable, value):
         transaction = self.get_transaction_by_id(transaction_id)
         assert transaction is not None
@@ -336,6 +337,7 @@ class ROMVScheduler(Scheduler):
         transaction.local_write(variable, value)
         return True  # succeed writing the new value
 
+    # TODO: doc!
     # Use the `_locks_manager` only for update transaction.
     def try_read(self, transaction_id, variable):
         transaction = self.get_transaction_by_id(transaction_id)
@@ -379,16 +381,11 @@ class ROMVScheduler(Scheduler):
         transaction.abort(self)
         # TODO: Undo the transaction. We currently storing the updates locally on the transaction itself only.
 
+    # For the GC mechanism, when a read-only transaction commits, we need to find the
+    # intersection of variables that the just-committed reader is responsible for, with
+    # the variables that the oldest younger read-only transaction is responsible for.
+    # This method helps us finding this read-only transaction.
     def get_read_transaction_younger_than(self, transaction: Transaction):
-        if transaction.is_read_only:
-            current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
-        else:
-            current_node = transaction.transactions_by_tid_list_node.prev_node
-        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
-            current_node = current_node.prev_node
-        return None if current_node is None else current_node.data
-
-    def get_read_transaction_older_than(self, transaction: Transaction):
         if transaction.is_read_only:
             current_node = transaction.ro_transactions_by_arrival_list_node.next_node
         else:
@@ -397,6 +394,25 @@ class ROMVScheduler(Scheduler):
             current_node = current_node.next_node
         return None if current_node is None else current_node.data
 
+    # For the GC mechanism, when a read-only transaction commits, we need to find the
+    # responsibility time-span of the just-committed reader. This time-span starts
+    # when the youngest older reader was born.
+    # This method helps us finding this read-only transaction.
+    def get_read_transaction_older_than(self, transaction: Transaction):
+        if transaction.is_read_only:
+            current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
+        else:
+            current_node = transaction.transactions_by_tid_list_node.prev_node
+        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
+            current_node = current_node.prev_node
+        return None if current_node is None else current_node.data
+
+    # For the GC mechanism, when an updater transaction commits, we need to decide
+    # whether to evict the previous version of the updated variables. If there exists
+    # a read-only transaction that is responsible for the previous version, we should
+    # do nothing there. But it there is no such reader, the update transaction should
+    # mark the previous version for eviction.
+    # This method helps us finding whether this read-only transaction exists.
     def are_there_read_transactions_after_ts_and_before_transaction(self, after_ts: Timestamp, before_transaction: Transaction):
         reader = self.get_read_transaction_younger_than(before_transaction)
         if reader is None:

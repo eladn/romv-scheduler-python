@@ -244,13 +244,19 @@ class Scheduler(ABC):
 
     def __init__(self, scheduling_scheme):
         assert(scheduling_scheme in self.SchedulingSchemes)
+        # TODO: doc!
         self._scheduling_scheme = scheduling_scheme
+        # TODO: doc!
         self._ongoing_transactions_by_tid = DoublyLinkedList()
+        # TODO: doc!
         self._ongoing_ro_transactions_by_arrival = DoublyLinkedList()
         self._ongoing_u_transactions_by_arrival = DoublyLinkedList()
+        # TODO: doc!
         self._to_remove_transactions = DoublyLinkedList()
+        # TODO: doc!
         self._ongoing_transactions_mapping = dict()
 
+    # TODO: doc!
     def add_transaction(self, transaction: Transaction):
         assert not transaction.is_completed and not transaction.is_aborted
         assert transaction.transaction_id not in self._ongoing_transactions_mapping
@@ -268,18 +274,23 @@ class Scheduler(ABC):
             transaction.u_transactions_by_arrival_list_node = node
 
         self._ongoing_transactions_mapping[transaction.transaction_id] = transaction
+
+        # TODO: doc!
         self.on_add_transaction(transaction)
 
+    # TODO: doc!
     def mark_transaction_to_remove(self, transaction: Transaction):
         assert transaction.transaction_id in self._ongoing_transactions_mapping
         del self._ongoing_transactions_mapping[transaction.transaction_id]
         self._to_remove_transactions.push_back(transaction)
 
+    # TODO: doc!
     def remove_marked_to_remove_transactions(self):
         for transaction_to_remove in self._to_remove_transactions:
             self.remove_transaction(transaction_to_remove)
         self._to_remove_transactions.clear()
 
+    # TODO: doc!
     def remove_transaction(self, transaction_to_remove: Transaction):
         self._ongoing_transactions_by_tid.remove_node(transaction_to_remove.transactions_by_tid_list_node)
         if transaction_to_remove.is_read_only:
@@ -294,6 +305,7 @@ class Scheduler(ABC):
             return self._ongoing_transactions_mapping[transaction_id]
         return None
 
+    # TODO: doc!
     def _find_transaction_with_maximal_tid_lower_than(self, transaction_id):
         prev_transaction = None
         for transaction in self._ongoing_transactions_by_tid:
@@ -302,6 +314,7 @@ class Scheduler(ABC):
             prev_transaction = transaction
         return prev_transaction
 
+    # TODO: doc!
     def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
         while len(self._ongoing_transactions_by_tid) > 0:
             if self._scheduling_scheme == 'RR':
@@ -339,6 +352,7 @@ class Scheduler(ABC):
         ...
 
 
+# TODO: doc!
 # Notice: we could use a bloom-filter here. # TODO: elaborate on it.
 class NoFalseNegativeVariablesSet:
     def __init__(self):
