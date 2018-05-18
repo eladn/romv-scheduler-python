@@ -373,7 +373,7 @@ class ROMVScheduler(Scheduler):
         # Notice: The call to `transaction.abort(..)` invokes the user-callback that might
         # add a new transaction with the same transaction id as of the aborted transaction.
         # It is ok because we already marked the aborted transaction to remove, and by side
-        # effect it has been removed from the transaction_id_to_transaction_mapping.
+        # effect it has been removed from the ongoing_transactions_mapping.
         # Additionally, note that the potentially new added transaction (with the same
         # transaction id) has been added before the aborted transaction in the transactions
         # list sorted by transaction_id. So that the iteration in `run(..)` won't encounter

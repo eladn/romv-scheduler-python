@@ -266,9 +266,14 @@ class Scheduler(ABC):
     UTransaction = Transaction
 
     def __init__(self, scheduling_scheme):
+        # The `scheduling_scheme` affects the order of the iteration over transactions
+        # as enforced by the ongoing transactions iterator. The method `run()` is using
+        # that iterator. More explanation about the ongoing transactions iterator later.
         assert(scheduling_scheme in self.SchedulingSchemes)
-        # TODO: doc!
         self._scheduling_scheme = scheduling_scheme
+
+        # Note: All of the lists mentioned below keep a track only for ongoing transactions.
+        # Committed and aborted transactions are eventually removed from these data structures.
 
         # Transactions are stored in a list, stored by transaction id, so that the scheduler can
         # iterate over the transactions by the order of their transaction id.
@@ -281,22 +286,33 @@ class Scheduler(ABC):
         self._ongoing_ro_transactions_by_arrival = DoublyLinkedList()
         self._ongoing_u_transactions_by_arrival = DoublyLinkedList()
 
-        # TODO: doc!
+        # During the main iteration over the transactions (inside of the `run()` method), the scheduler
+        # might decide to remove a transaction (if it commits or aborts). However, it is not safe to
+        # remove the transaction from the list while iterating over it. We solve this issue by only
+        # marking the transaction as "to be removed", while iterating over the list. Later, in the end
+        # of each loop over the transactions, we perform the actual removal by calling the method
+        # `remove_marked_to_remove_transactions()`. It is done in the iterator as described later on.
         self._to_remove_transactions = DoublyLinkedList()
 
-        # TODO: doc!
+        # Mapping from transaction id to the matching transaction instance. Keeps a track only for
+        # ongoing transactions. Committed and aborted transactions are removed from this mapping.
+        # The operations stores the transaction_id they belongs to, but now the transaction instance.
+        # In the `operation.try_perform()` we might need to retrieve the transaction instance.
+        # It is done by calling `scheduler.get_transaction_by_id(tid)` that is using this mapping.
         self._ongoing_transactions_mapping = dict()
 
-    # TODO: doc!
     def add_transaction(self, transaction: Transaction):
         assert not transaction.is_completed and not transaction.is_aborted
         assert transaction.transaction_id not in self._ongoing_transactions_mapping
 
+        # Add the transaction to the correct place in the transactions list
+        # sorted by transaction id.
         insert_after_transaction = self._find_transaction_with_maximal_tid_lower_than(transaction.transaction_id)
         insert_after_transaction_node = insert_after_transaction.transactions_by_tid_list_node
         node = self._ongoing_transactions_by_tid.insert_after_node(transaction, insert_after_transaction_node)
         transaction.transactions_by_tid_list_node = node
 
+        # Add the transaction to the end of the transactions list sorted by arrival.
         node = self._ongoing_transactions_by_arrival.push_back(transaction)
         transaction.transactions_by_arrival_list_node = node
 
@@ -307,9 +323,12 @@ class Scheduler(ABC):
             node = self._ongoing_u_transactions_by_arrival.push_back(transaction)
             transaction.u_transactions_by_arrival_list_node = node
 
+        # Add the new transaction to the mapping by transaction-id.
         self._ongoing_transactions_mapping[transaction.transaction_id] = transaction
 
-        # TODO: doc!
+        # The method `on_add_transaction` might be overridden by the inheritor scheduler,
+        # if it has to do something each time a transaction is added. Calling it here is
+        # the mechanism to notify the inheritor scheduler that a transaction has been added.
         self.on_add_transaction(transaction)
 
     # TODO: doc!
@@ -382,22 +401,27 @@ class Scheduler(ABC):
             # of each outer loop we remove all of the transaction that are marked to be removed.
             self.remove_marked_to_remove_transactions()
 
-    # Called by the user.
+    # Called by the scheduler each time the method `add_transaction()` is called.
+    # Might be overridden by the inheritor scheduler, if it has to do something
+    # each time a transaction is added.
     @abstractmethod
     def on_add_transaction(self, transaction: Transaction):
         pass  # default implementation - do nothing
 
     # Called by the user. Perform transactions until no transactions left.
+    # Must be implemented by the inheritor scheduler.
     @abstractmethod
     def run(self):
         ...
 
     # Called by an operation of a transaction, when `next_operation.try_perform(..)` is called by its transaction.
+    # Must be implemented by the inheritor scheduler.
     @abstractmethod
     def try_write(self, transaction_id, variable, value):
         ...
 
     # Called by an operation of a transaction, when `next_operation.try_perform(..)` is called by its transaction.
+    # Must be implemented by the inheritor scheduler.
     @abstractmethod
     def try_read(self, transaction_id, variable):
         ...
