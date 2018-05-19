@@ -108,6 +108,7 @@ class CommitOperation(Operation):
     def try_perform(self, scheduler):
         assert not self._is_completed
         # TODO: impl - what should we do here actually?
+        # answer : update the versions with a new one that was written in that operation
         self._is_completed = True
         return True
 

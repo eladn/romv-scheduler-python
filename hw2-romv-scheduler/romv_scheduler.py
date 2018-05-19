@@ -1,23 +1,32 @@
 from collections import namedtuple
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
     NoFalseNegativeVariablesSet, Timespan
+import networkx as nx
 
 
 class DeadlockDetector:
     def __init__(self):
-        self._wait_for_graph = None  # TODO: create a new directed graph (using networx lib).
-        pass  # TODO: impl
+        self._wait_for_graph = nx.DiGraph()  # reate a new directed graph (using networx lib).
 
     # Returns whether a dependency cycle has been created because of this new waiting.
     # If not, add the constrain to (add the matching edge to the graph).
     def wait_for(self, waiting_transaction_id, waiting_for_transaction_id):
-        pass  # TODO: impl
+        if not(self._wait_for_graph.has_node(waiting_transaction_id)):
+            self._wait_for_graph.add_node(waiting_transaction_id)
+        if not(self._wait_for_graph.has_node(waiting_for_transaction_id)):
+            self._wait_for_graph.add_node(waiting_for_transaction_id)
+
+        self._wait_for_graph.add_edge(waiting_transaction_id,waiting_for_transaction_id)
 
     def transaction_ended(self, ended_transaction_id):
-        pass  # TODO: impl. delete this transaction and the relevant edges.
+        # delete this transaction and the relevant edges.
+        if self._wait_for_graph.has_node(ended_transaction_id):
+            self._wait_for_graph.remove_node(ended_transaction_id)
 
     def is_deadlock(self):
-        pass  # TODO: impl
+        if len(nx.find_cycle(self._wait_for_graph))==0 : return False
+        else: return True;
+
 
 
 class LocksManager:
