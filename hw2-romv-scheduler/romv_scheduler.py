@@ -38,7 +38,9 @@ class LocksManager:
 
         # locks table fields (read locks multiset + write locks set)
         # our multiset would be a dict ! for each key will count the amount of its duplications.
-        #TODO - figure out a way to keep for each transaction which read locks she have so we can delete them
+        # todo - temp solution for the saving : dict of tuples : (read,write)
+        self._transactions_locks_sets = dict()
+
         self._read_locks_table = dict()
         #the key is the variable , the value is how locks it at the moment
         self._write_locks_table = dict()
@@ -52,27 +54,47 @@ class LocksManager:
     # we identify deadlocks here - because we have the  DeadlockDetector instance here - and this is the lock manager!!!
     def try_acquire_lock(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
-
+        read =0
+        write=1
         if read_or_write == "read" :
-            if variable in self._read_locks_table.keys() :
-                self._read_locks_table[variable]+=1
-            else : self._read_locks_table[variable]=1
+            if transaction_id not in self._transactions_locks_sets:
+                self._transactions_locks_sets[transaction_id]=([],[])
+
+            if variable not in self._transactions_locks_sets[transaction_id][read]:
+                self._transactions_locks_sets[transaction_id][read].add(variable)
+                if variable in self._read_locks_table.keys():
+                    self._read_locks_table[variable] += 1
+                else:
+                    self._read_locks_table[variable] = 1
+
+
 
         if read_or_write == "write":
+            if transaction_id not in self._transactions_locks_sets:
+                self._transactions_locks_sets[transaction_id] = ([], [])
+
             if variable in self._write_locks_table.keys():
                 depends_on = self._write_locks_table[variable]
-                if self._deadlock_detector.wait_for(transaction_id,depends_on):
-                    return "WAIT"
-                else : return "DEADLOCK"
-            else: self._write_locks_table[variable]=transaction_id
+                if depends_on != transaction_id: #if it is the same transaction - no change is needed
+                    if self._deadlock_detector.wait_for(transaction_id,depends_on):
+                        return "WAIT"
+                    else : return "DEADLOCK"
+            else:
+                self._write_locks_table[variable]=transaction_id
+                if variable not in self._transactions_locks_sets[transaction_id][write]:
+                    self._transactions_locks_sets[transaction_id][write].add(variable)
         return "GOT_LOCK"
 
 
     def release_all_locks(self, transaction_id):
         self._deadlock_detector.transaction_ended(transaction_id)
-
-        # TODO: remove the locks from the data structures
-        pass  # TODO: impl
+        # remove the locks from the data structures : self._read_locks_table ,self._write_locks_table
+        (readlist,writelist)=self._transactions_locks_sets[transaction_id]
+        for readI in readlist :
+            self._read_locks_table[readI]+=-1
+            if self._read_locks_table[readI]==0 : self._read_locks_table.pop(readI)
+        for writeI in writelist :
+            self._write_locks_table.pop(writeI) #we pop the variable from the dict - remove it completely
 
     #def is_deadlock(self):
         #return self._deadlock_detector.is_deadlock()
