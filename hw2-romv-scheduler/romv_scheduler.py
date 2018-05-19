@@ -58,7 +58,7 @@ class LocksManager:
         write=1
         if read_or_write == "read" :
             if transaction_id not in self._transactions_locks_sets:
-                self._transactions_locks_sets[transaction_id]=([],[])
+                self._transactions_locks_sets[transaction_id]=(set(),set())
 
             if variable not in self._transactions_locks_sets[transaction_id][read]:
                 self._transactions_locks_sets[transaction_id][read].add(variable)
@@ -95,6 +95,9 @@ class LocksManager:
             if self._read_locks_table[readI]==0 : self._read_locks_table.pop(readI)
         for writeI in writelist :
             self._write_locks_table.pop(writeI) #we pop the variable from the dict - remove it completely
+        #remove the transaction data
+        self._transactions_locks_sets.pop(transaction_id)
+
 
     #def is_deadlock(self):
         #return self._deadlock_detector.is_deadlock()
