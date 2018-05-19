@@ -15,8 +15,11 @@ class DeadlockDetector:
             self._wait_for_graph.add_node(waiting_transaction_id)
         if not(self._wait_for_graph.has_node(waiting_for_transaction_id)):
             self._wait_for_graph.add_node(waiting_for_transaction_id)
-
         self._wait_for_graph.add_edge(waiting_transaction_id,waiting_for_transaction_id)
+        if self.is_deadlock() :
+            self._wait_for_graph.remove_edge(waiting_transaction_id,waiting_for_transaction_id)
+            return False
+        else: return True
 
     def transaction_ended(self, ended_transaction_id):
         # delete this transaction and the relevant edges.
@@ -31,29 +34,54 @@ class DeadlockDetector:
 
 class LocksManager:
     def __init__(self):
-        # TODO: decide - whether do we want to check for deadlocks here or in the romv-scheduler.
         self._deadlock_detector = DeadlockDetector()
-        pass  # TODO: impl - locks table fields (read locks multiset + write locks set)
+
+        # locks table fields (read locks multiset + write locks set)
+        # our multiset would be a dict ! for each key will count the amount of its duplications.
+        #TODO - figure out a way to keep for each transaction which read locks she have so we can delete them
+        self._read_locks_table = dict()
+        #the key is the variable , the value is how locks it at the moment
+        self._write_locks_table = dict()
+
 
     # Returns:
     #   "GOT_LOCK" the lock has been acquired successfully (or the transaction also has the lock).
     #   "WAIT" is the lock could not be acquired now (someone else is holding it, but there is no dependency cycle).
     #   "DEADLOCK" if a deadlock will be created if the transaction would wait for this wanted lock.
-    # TODO: decide- do we really want to identify deadlocks here, or in the `ROMVScheduler` itself?
+
+    # we identify deadlocks here - because we have the  DeadlockDetector instance here - and this is the lock manager!!!
     def try_acquire_lock(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
-        pass  # TODO: impl
+
+        if read_or_write == "read" :
+            if variable in self._read_locks_table.keys() :
+                self._read_locks_table[variable]+=1
+            else : self._read_locks_table[variable]=1
+
+        if read_or_write == "write":
+            if variable in self._write_locks_table.keys():
+                depends_on = self._write_locks_table[variable]
+                if self._deadlock_detector.wait_for(transaction_id,depends_on):
+                    return "WAIT"
+                else : return "DEADLOCK"
+            else: self._write_locks_table[variable]=transaction_id
+        return "GOT_LOCK"
+
 
     def release_all_locks(self, transaction_id):
-        # TODO: call self._deadlock_detector.transaction_ended(transaction_id)
+        self._deadlock_detector.transaction_ended(transaction_id)
+
+        # TODO: remove the locks from the data structures
         pass  # TODO: impl
 
-    def is_deadlock(self):
-        return self._deadlock_detector.is_deadlock()
+    #def is_deadlock(self):
+        #return self._deadlock_detector.is_deadlock()
 
 
 class MultiVersionDataManager:
     def __init__(self):
+        self._versions_dict = dict()
+        self._disk_last_commited_values = dict()
         # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
         pass  # TODO: impl
 
