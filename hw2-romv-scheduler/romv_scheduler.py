@@ -38,7 +38,7 @@ class LocksManager:
 
         # locks table fields (read locks multiset + write locks set)
         # our multiset would be a dict ! for each key will count the amount of its duplications.
-        # todo - temp solution for the saving : dict of tuples : (read,write)
+        # dict of tuples : (read,write)
         self._transactions_locks_sets = dict()
 
         self._read_locks_table = dict()
@@ -89,7 +89,7 @@ class LocksManager:
     def release_all_locks(self, transaction_id):
         self._deadlock_detector.transaction_ended(transaction_id)
         # remove the locks from the data structures : self._read_locks_table ,self._write_locks_table
-        (readlist,writelist)=self._transactions_locks_sets[transaction_id]
+        readlist,writelist = self._transactions_locks_sets[transaction_id]
         for readI in readlist :
             self._read_locks_table[readI]+=-1
             if self._read_locks_table[readI]==0 : self._read_locks_table.pop(readI)
@@ -105,25 +105,41 @@ class LocksManager:
 
 class MultiVersionDataManager:
     def __init__(self):
-        self._versions_dict = dict()
-        self._disk_last_commited_values = dict()
+        self._versions_dict_by_variables = dict() #for each var all of its versions (with ts)
+        self._disk_last_all_version_values = dict() #for each var it's most updated value
         # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
-        pass  # TODO: impl
+        #todo - need to check if that what was wanted
+
 
     # Returns `None` if there wasn't any write to this variable yet.
     def read_older_version_than(self, variable, max_ts: Timestamp):
-        pass  # TODO: impl
+        if variable in self._versions_dict_by_variables.keys():
+            for (value , ts) in reversed(self._versions_dict_by_variables[variable]):
+                if ts < max_ts : return value
+        return None
+
 
     def write_new_version(self, variable, new_value, ts: Timestamp):
-        pass  # TODO: impl
+        if variable not in self._versions_dict_by_variables.keys():
+            self._versions_dict_by_variables[variable]=[(new_value,ts)]
+        else : self._versions_dict_by_variables[variable].append((new_value,ts))
 
+    # gets the ts of the latest version
     # Returns `None` if there wasn't any write to this variable yet.
     def get_latest_version_number(self, variable):
-        pass  # TODO: impl
+        ts=1
+        if variable in self._versions_dict_by_variables.keys():
+            return self._versions_dict_by_variables[variable][-1][ts]
+        else : return None
+
 
     # Returns `None` if there wasn't any write to this variable yet.
     def read_latest_version(self, variable):
-        pass  # TODO: impl
+        value = 0
+        if variable in self._versions_dict_by_variables.keys():
+            return self._versions_dict_by_variables[variable][-1][value]
+        else:
+            return None
 
     # This method is used by the GC eventual eviction mechanism.
     # Removes versions of the given variable that are inside of the given timespan
@@ -138,7 +154,16 @@ class MultiVersionDataManager:
     def delete_old_versions_in_interval(self, variable,
                                         remove_versions_in_timespan: Timespan,
                                         promised_newer_version_in_timespan: Timespan):
-        pass  # TODO: impl
+        flag_promised = False
+        flag_remove_found = False
+        if variable in self._versions_dict_by_variables.keys():
+            for (value , ts) in reversed(self._versions_dict_by_variables[variable]):
+                if promised_newer_version_in_timespan['from_ts'] > ts > promised_newer_version_in_timespan['to_ts'] :
+                    flag_promised = True
+                if remove_versions_in_timespan['from_ts'] > ts > remove_versions_in_timespan['to_ts']:
+                    flag_remove_found = True
+                    if flag_promised : self._versions_dict_by_variables[variable].remove((value , ts))
+        return flag_remove_found,flag_promised
 
 
 class ROMVTransaction(Scheduler.ROTransaction):
