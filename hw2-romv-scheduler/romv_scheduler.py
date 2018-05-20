@@ -45,6 +45,15 @@ class LocksManager:
         #the key is the variable , the value is how locks it at the moment
         self._write_locks_table = dict()
 
+    #helper function - helps to return if we wait or if we are in deadlock
+    def check_deadlock_at_given_table(self,table,variable,transaction_id):
+        depends_on = table[variable]
+        if depends_on != transaction_id:  # if it is the same transaction - no change is needed
+            if self._deadlock_detector.wait_for(transaction_id, depends_on):
+                return "WAIT"
+            else:
+                return "DEADLOCK"
+        return "NEXT"
 
     # Returns:
     #   "GOT_LOCK" the lock has been acquired successfully (or the transaction also has the lock).
@@ -60,13 +69,17 @@ class LocksManager:
             if transaction_id not in self._transactions_locks_sets:
                 self._transactions_locks_sets[transaction_id]=(set(),set())
 
-            if variable not in self._transactions_locks_sets[transaction_id][read]:
-                self._transactions_locks_sets[transaction_id][read].add(variable)
-                if variable in self._read_locks_table.keys():
-                    self._read_locks_table[variable] += 1
-                else:
-                    self._read_locks_table[variable] = 1
+            if variable in self._write_locks_table.keys():
+                answer =  self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
+                if answer !="NEXT" : return answer
 
+            else:
+                if variable not in self._transactions_locks_sets[transaction_id][read]:
+                    self._transactions_locks_sets[transaction_id][read].add(variable)
+                    if variable in self._read_locks_table.keys():
+                        self._read_locks_table[variable] += 1
+                    else:
+                        self._read_locks_table[variable] = 1
 
 
         if read_or_write == "write":
@@ -74,15 +87,21 @@ class LocksManager:
                 self._transactions_locks_sets[transaction_id] = ([], [])
 
             if variable in self._write_locks_table.keys():
-                depends_on = self._write_locks_table[variable]
-                if depends_on != transaction_id: #if it is the same transaction - no change is needed
-                    if self._deadlock_detector.wait_for(transaction_id,depends_on):
-                        return "WAIT"
-                    else : return "DEADLOCK"
+
+                answer =  self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
+                if answer !="NEXT" : return answer
+
             else:
-                self._write_locks_table[variable]=transaction_id
-                if variable not in self._transactions_locks_sets[transaction_id][write]:
-                    self._transactions_locks_sets[transaction_id][write].add(variable)
+
+                if variable in self._read_locks_table.keys():
+                    answer = self.check_deadlock_at_given_table(self._read_locks_table, variable, transaction_id)
+                    if answer != "NEXT": return answer
+
+                else:
+                    self._write_locks_table[variable]=transaction_id
+                    if variable not in self._transactions_locks_sets[transaction_id][write]:
+                        self._transactions_locks_sets[transaction_id][write].add(variable)
+
         return "GOT_LOCK"
 
 
