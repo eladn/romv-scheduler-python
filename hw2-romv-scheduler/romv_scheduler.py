@@ -6,7 +6,7 @@ import networkx as nx
 # class meant for deadlock detecting using dependency graph
 class DeadlockDetector:
     def __init__(self):
-        self._wait_for_graph = nx.DiGraph()  # reate a new directed graph (using networx lib).
+        self._wait_for_graph = nx.DiGraph()  # create a new directed graph (using networx lib).
 
     # Returns whether a dependency cycle has been created because of this new waiting.
     # If not, add the constrain to (add the matching edge to the graph).
