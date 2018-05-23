@@ -2,6 +2,8 @@ from collections import namedtuple
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
     NoFalseNegativeVariablesSet, Timespan
 import networkx as nx
+assert int(nx.__version__.split('.')[0]) >= 2
+
 
 # class meant for deadlock detecting using dependency graph
 class DeadlockDetector:
@@ -17,23 +19,25 @@ class DeadlockDetector:
         if not(self._wait_for_graph.has_node(waiting_for_transaction_id)):
             self._wait_for_graph.add_node(waiting_for_transaction_id)
 
-        self._wait_for_graph.add_edge(waiting_transaction_id,waiting_for_transaction_id)
-        if self.is_deadlock() :
-            self._wait_for_graph.remove_edge(waiting_transaction_id,waiting_for_transaction_id)
+        self._wait_for_graph.add_edge(waiting_transaction_id, waiting_for_transaction_id)
+        if self.is_deadlock():
+            self._wait_for_graph.remove_edge(waiting_transaction_id, waiting_for_transaction_id)
             return False
-        else: return True
+        return True
 
     # delete this transaction and the relevant edges when a certain transaction ends.
     def transaction_ended(self, ended_transaction_id):
-
         if self._wait_for_graph.has_node(ended_transaction_id):
-            self._wait_for_graph.remove_node(ended_transaction_id) #should remove all the connected edges to the ended_transaction_id
+            # should remove all the connected edges to the ended_transaction_id
+            self._wait_for_graph.remove_node(ended_transaction_id)
 
-    #checks if there is a cycle in the graph - is so returns true, else return false.
+    # checks if there is a cycle in the graph - is so returns true, else return false.
     def is_deadlock(self):
-        if len(nx.find_cycle(self._wait_for_graph))==0 : return False
-        else: return True;
-
+        try:
+            nx.find_cycle(self._wait_for_graph, orientation='original')
+            return True
+        except nx.NetworkXNoCycle:
+            return False
 
 
 class LocksManager:
@@ -44,16 +48,18 @@ class LocksManager:
         # our multiset would be a dict ! for each key will count the amount of its duplications.
         # dict : key - transaction id, value - tuple(read,write)
         self._transactions_locks_sets = dict()
-        #the read locks table : the key is the variable to lock , the value is how many locks it has at the moment
+        # the read locks table : the key is the variable to lock
+        #                        the value is how many locks it has at the moment
         self._read_locks_table = dict()
-        #the write locks table : the key is the variable to lock ' the value is what transaction currently locks the variable.
+        # the write locks table : the key is the variable to lock
+        #                         the value is what transaction currently locks the variable
         self._write_locks_table = dict()
 
-    #helper function for try_acquire_lock :
+    # helper function for try_acquire_lock :
     # return WAIT if the curr transaction can wait on the transaction holding the lock without a deadlock
     # returns DEADLOCK if the curr transaction cant wait on the transaction holding the lock without a deadlock
     # returns NEXT if the curr transaction is the one who hold the key on the variable
-    def check_deadlock_at_given_table(self,table,variable,transaction_id):
+    def check_deadlock_at_given_table(self, table, variable, transaction_id):
         depends_on = table[variable]
         if depends_on != transaction_id:  # if it is the same transaction - no change is needed
             if self._deadlock_detector.wait_for(transaction_id, depends_on):
@@ -70,30 +76,30 @@ class LocksManager:
     # we identify deadlocks here
     def try_acquire_lock(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
-        read =0
-        write=1
-        if read_or_write == "read" :
+        read = 0
+        write = 1
+        if read_or_write == "read":
 
             if transaction_id not in self._transactions_locks_sets:
                 # when the transaction is new
-                self._transactions_locks_sets[transaction_id]=(set(),set())
+                self._transactions_locks_sets[transaction_id] = (set(), set())
 
             if variable in self._write_locks_table.keys():
-                #if the variable is already in the write locks table
-                #checks if there is a dead lock for holding another write key on the var
-                answer =  self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
-                if answer !="NEXT" : return answer
+                # if the variable is already in the write locks table
+                # checks if there is a dead lock for holding another write key on the var
+                answer = self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
+                if answer != "NEXT":
+                    return answer
 
-            else: #when the var is not in the write locks table (free)
+            else:  # when the var is not in the write locks table (free)
                 if variable not in self._transactions_locks_sets[transaction_id][read]:
-                    #if we dont have a lock on it in the curr transaction - add it
+                    # if we dont have a lock on it in the curr transaction - add it
                     self._transactions_locks_sets[transaction_id][read].add(variable)
-            #update the global read locks table - that we got the lock
+            # update the global read locks table - that we got the lock
             if variable in self._read_locks_table.keys():
                 self._read_locks_table[variable] += 1
             else:
                 self._read_locks_table[variable] = 1
-
 
         if read_or_write == "write":
             if transaction_id not in self._transactions_locks_sets:
@@ -101,40 +107,43 @@ class LocksManager:
                 self._transactions_locks_sets[transaction_id] = ([], [])
 
             if variable in self._write_locks_table.keys():
-                #if there is already a write lock on that lock - check if it will deadlock if we wait on it
-                answer =  self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
-                if answer !="NEXT" : return answer
+                # if there is already a write lock on that lock - check if it will deadlock if we wait on it
+                answer = self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
+                if answer != "NEXT":
+                    return answer
 
-            else: #when the var have no write lock on it
+            else:  # when the var have no write lock on it
                 if variable in self._read_locks_table.keys():
-                    #if the var have read lock on it - check if waiting on it wont case a dead lock - return accordingly
+                    # if the var have read lock on it - check if waiting on it wont case a dead lock - return accordingly
                     answer = self.check_deadlock_at_given_table(self._read_locks_table, variable, transaction_id)
-                    if answer != "NEXT": return answer
+                    if answer != "NEXT":
+                        return answer
 
-            #update the global write table and of the transaction that we got the lock
-            self._write_locks_table[variable]=transaction_id
+            # update the global write table and of the transaction that we got the lock
+            self._write_locks_table[variable] = transaction_id
             if variable not in self._transactions_locks_sets[transaction_id][write]:
                 self._transactions_locks_sets[transaction_id][write].add(variable)
 
-
         return "GOT_LOCK"
 
-    #when transaction_id is done and wants to release all of its locks
+    # when transaction_id is done and wants to release all of its locks
     def release_all_locks(self, transaction_id):
         self._deadlock_detector.transaction_ended(transaction_id)
         # remove the locks from the data structures : self._read_locks_table ,self._write_locks_table
-        readlist,writelist = self._transactions_locks_sets[transaction_id]
-        for readI in readlist :
-            self._read_locks_table[readI]+=-1
-            if self._read_locks_table[readI]==0 : self._read_locks_table.pop(readI)
-        for writeI in writelist :
-            self._write_locks_table.pop(writeI) #we pop the variable from the dict - remove it completely
-        #remove the transaction data of the global transactions dict
+        readlist, writelist = self._transactions_locks_sets[transaction_id]
+        for readI in readlist:
+            self._read_locks_table[readI] -= 1
+            if self._read_locks_table[readI] == 0:
+                self._read_locks_table.pop(readI)
+        for writeI in writelist:
+            self._write_locks_table.pop(writeI)  # we pop the variable from the dict - remove it completely
+        # remove the transaction data of the global transactions dict
         self._transactions_locks_sets.pop(transaction_id)
 
-    #returns if there is a deadlock at the moment
+    # returns if there is a deadlock at the moment
     def is_deadlock(self):
         return self._deadlock_detector.is_deadlock()
+
 
 # the class that manages the versions of values of the vars in the system
 class MultiVersionDataManager:
@@ -145,25 +154,25 @@ class MultiVersionDataManager:
         self._disk_last_all_version_values = dict()
 
         # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
-        #todo - need to check if that what was wanted
-
+        # todo - need to check if that what was wanted
 
     # returns the latest value before the curr timestamp
     # Returns `None` if there wasn't any write to this variable yet.
     def read_older_version_than(self, variable, max_ts: Timestamp):
         if variable in self._versions_dict_by_variables.keys():
-            for (value , ts) in reversed(self._versions_dict_by_variables[variable]):
-                if ts < max_ts : return value
+            for (value, ts) in reversed(self._versions_dict_by_variables[variable]):
+                if ts < max_ts:
+                    return value
         return None
 
     # adds the new version to the latest one and also to the list of versions for each var
     def write_new_version(self, variable, new_value, ts: Timestamp):
         if variable not in self._versions_dict_by_variables.keys():
-            self._versions_dict_by_variables[variable]=[(new_value,ts)]
-        else : self._versions_dict_by_variables[variable].append((new_value,ts))
-        #update the disk
-        self._disk_last_all_version_values[variable]=new_value
-
+            self._versions_dict_by_variables[variable] = [(new_value, ts)]
+        else:
+            self._versions_dict_by_variables[variable].append((new_value, ts))
+        # update the disk
+        self._disk_last_all_version_values[variable] = new_value
 
     # gets the ts of the latest version
     # Returns `None` if there wasn't any write to this variable yet.
@@ -171,7 +180,7 @@ class MultiVersionDataManager:
         ts = 1
         if variable in self._versions_dict_by_variables.keys():
             return self._versions_dict_by_variables[variable][-1][ts]
-        else : return None
+        return None
 
     # gets the value of the latest version of the var
     # Returns `None` if there wasn't any write to this variable yet.
@@ -179,8 +188,7 @@ class MultiVersionDataManager:
         value = 0
         if variable in self._versions_dict_by_variables.keys():
             return self._versions_dict_by_variables[variable][-1][value]
-        else:
-            return None
+        return None
 
     # This method is used by the GC eventual eviction mechanism.
     # Removes versions of the given variable that are inside of the given timespan
@@ -198,13 +206,14 @@ class MultiVersionDataManager:
         flag_promised = False
         flag_remove_found = False
         if variable in self._versions_dict_by_variables.keys():
-            for (value , ts) in reversed(self._versions_dict_by_variables[variable]):
-                if promised_newer_version_in_timespan['from_ts'] > ts > promised_newer_version_in_timespan['to_ts'] :
+            for (value, ts) in reversed(self._versions_dict_by_variables[variable]):
+                if promised_newer_version_in_timespan['from_ts'] > ts > promised_newer_version_in_timespan['to_ts']:
                     flag_promised = True
                 if remove_versions_in_timespan['from_ts'] > ts > remove_versions_in_timespan['to_ts']:
                     flag_remove_found = True
-                    if flag_promised : self._versions_dict_by_variables[variable].remove((value , ts))
-        return flag_remove_found,flag_promised
+                    if flag_promised:
+                        self._versions_dict_by_variables[variable].remove((value, ts))
+        return flag_remove_found, flag_promised
 
 
 class ROMVTransaction(Scheduler.ROTransaction):
