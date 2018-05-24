@@ -360,6 +360,12 @@ class MultiVersionGC:
         right_variables_set, right_reader_responsibility_timespan = self._get_committed_variables_set_after_reader_and_before_next(
             committed_read_transaction, scheduler)
 
+        # The just-committed-read-transaction has indeed ended. Hence the returned timespan of the younger alive
+        # reader ALREADY includes the timespan of this just-committed-reader. We want to have the timespan of the
+        # right reader, as it was just before the current transaction ended.
+        right_reader_responsibility_timespan = Timespan(from_ts=committed_read_transaction.timestamp,
+                                                        to_ts=right_reader_responsibility_timespan.to_ts)
+
         # This is the time-span of the responsibility of the just-committed-reader.
         # Reminder: The responsibility time is from the birth of youngest-older reader,
         #           and until the birth of the just-committed-reader.
@@ -455,7 +461,8 @@ class MultiVersionGC:
             return self._committed_variables_set_since_younger_reader_born, responsibility_timespan
         assert isinstance(younger_transaction, ROMVTransaction)
         responsibility_timespan = self._get_responsibility_timespan_of_read_transaction(younger_transaction, scheduler)
-        assert responsibility_timespan.from_ts == after_reader.timestamp
+        assert (after_reader.is_finished and responsibility_timespan.from_ts < after_reader.timestamp) or \
+               (not after_reader.is_finished and responsibility_timespan.from_ts == after_reader.timestamp)
         return younger_transaction.committed_variables_set_since_last_reader_born, responsibility_timespan
 
 
@@ -514,8 +521,7 @@ class ROMVScheduler(Scheduler):
                     transaction.timestamp = self._timestamps_manager.get_next_ts()
                     transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
-                # TODO: remove the comment from the following line and fix the GC !
-                # self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
+                self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
 
     # TODO: doc!
     def try_write(self, transaction_id, variable, value):
