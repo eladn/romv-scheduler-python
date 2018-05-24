@@ -520,6 +520,7 @@ class ROMVScheduler(Scheduler):
             assert not self._locks_manager.is_deadlock()
             if transaction.is_aborted:
                 # Note: the transaction already has been marked to remove by the scheduler.
+                assert isinstance(transaction, UMVTransaction)
                 continue
             if transaction.is_completed:
                 self.mark_transaction_to_remove(transaction)  # TODO: does it have to be after handling the completed transaction?
@@ -587,6 +588,8 @@ class ROMVScheduler(Scheduler):
 
     # TODO: doc!
     def abort_transaction(self, transaction: Transaction):
+        assert not transaction.is_read_only
+        assert isinstance(transaction, UMVTransaction)
         self._locks_manager.release_all_locks(transaction.transaction_id)
         self.mark_transaction_to_remove(transaction)  # TODO: is it ok?
         # Notice: The call to `transaction.abort(..)` invokes the user-callback that might
