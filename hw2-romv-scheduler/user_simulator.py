@@ -268,7 +268,7 @@ class TransactionSimulator:
         if len(self._ongoing_operation_simulators_queue) < 1:
             return
         next_operation_simulator = self._ongoing_operation_simulators_queue[0]
-        if next_operation_simulator.operation == 'write':
+        if next_operation_simulator.operation.get_type() == 'write':
             value_to_write = next_operation_simulator.get_value_to_write(self._local_variables)
             next_operation_simulator.operation.to_write_value = value_to_write
         self._transaction.add_operation(next_operation_simulator.operation)
