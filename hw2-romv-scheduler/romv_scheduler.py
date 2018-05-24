@@ -1,6 +1,7 @@
 from collections import namedtuple, defaultdict
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
     NoFalseNegativeVariablesSet, Timespan
+from logger import Logger
 import networkx as nx
 assert int(nx.__version__.split('.')[0]) >= 2
 
@@ -34,7 +35,8 @@ class DeadlockDetector:
     # checks if there is a cycle in the graph - is so returns true, else return false.
     def is_deadlock(self):
         try:
-            nx.find_cycle(self._wait_for_graph, orientation='original')
+            cycle = nx.find_cycle(self._wait_for_graph, orientation='original')
+            Logger().log('    >> is_deadlock() : found cycle {}'.format(cycle), 'scheduler_verbose')
             return True
         except nx.NetworkXNoCycle:
             return False
@@ -93,7 +95,7 @@ class LocksManager:
             return 'GOT_LOCK'
         assert isinstance(collides_with, set) and len(collides_with) > 0
         for wait_for_tid in collides_with:
-            deadlock_detected = self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
+            deadlock_detected = not self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
             if deadlock_detected:
                 return 'DEADLOCK'
         return 'WAIT'
