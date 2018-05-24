@@ -3,19 +3,26 @@ from scheduler_base_modules import Scheduler, Transaction
 
 class SerialScheduler(Scheduler):
     def __init__(self):
-        super().__init__()
+        super().__init__(scheduling_scheme='serial')
+        self._variables_latest_values = dict()
 
     def on_add_transaction(self, transaction: Transaction):
-        pass  # TODO: impl
+        pass  # We actually have nothing else to do here.
 
     def run(self):
-        pass  # TODO: impl
+        for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+            operation = transaction.try_perform_next_operation()
+            assert operation.is_completed
+            if transaction.is_completed:
+                self.mark_transaction_to_remove(transaction)
 
     def try_write(self, transaction_id, variable, value):
-        pass  # TODO: impl
+        self._variables_latest_values[variable] = value
+        return True
 
     def try_read(self, transaction_id, variable):
-        pass  # TODO: impl
+        assert variable in self._variables_latest_values
+        return self._variables_latest_values[variable]
 
     def get_variables(self):
-        pass  # TODO: impl
+        return self._variables_latest_values.items()

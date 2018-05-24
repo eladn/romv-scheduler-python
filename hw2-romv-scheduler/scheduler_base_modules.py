@@ -271,7 +271,7 @@ class Scheduler(ABC):
     ROTransaction = Transaction
     UTransaction = Transaction
 
-    def __init__(self, scheduling_scheme):
+    def __init__(self, scheduling_scheme='serial'):
         # The `scheduling_scheme` affects the order of the iteration over transactions
         # as enforced by the ongoing transactions iterator. The method `run()` is using
         # that iterator. More explanation about the ongoing transactions iterator later.
