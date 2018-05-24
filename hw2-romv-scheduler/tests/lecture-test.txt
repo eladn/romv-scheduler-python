@@ -1,0 +1,7 @@
+2 6
+U 0 w(x,1) w(y,2) w(z,3) c0;
+R 1 a0=r(x) a1=r(y) c1;
+U 2 w(x,1) b0=r(y) w(y,b0) c2;
+U 3 c0=r(x) w(x,c0) c3;
+R 4 d0=r(z) d1=r(x) c4;
+R 5 e0=r(z) e1=r(x) c5;
