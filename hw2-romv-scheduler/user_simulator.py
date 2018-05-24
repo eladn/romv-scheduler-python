@@ -76,7 +76,7 @@ class WriteOperationSimulator(OperationSimulator):
 # Used by the method: TransactionSimulator.parse_transaction_from_test_line(..)
 # Used by the method: TransactionSimulator.parse_and_add_operation(..)
 class TransactionParsingPatterns:
-    number_pattern = '[1-9][0-9]*'
+    number_pattern = '(([1-9][0-9]*)|0)'
     identifier_pattern = '[a-zA-Z_][a-zA-Z_0-9]*'
     const_value_pattern = number_pattern
     local_var_identifier_pattern = '(?P<local_var_identifier>' + identifier_pattern + ')'
@@ -90,10 +90,16 @@ class TransactionParsingPatterns:
     operation_pattern = '(?P<operation>(' + read_operation_pattern + '|' + write_operation_pattern + \
                         '|' + commit_operation_pattern + '))'
     operations_pattern = '(' + operation_pattern + '[\s]+)*'
-    transaction_header_pattern = '(?P<transaction_type>[UR])[\s]+' + \
-                                 '(?P<transaction_id>' + number_pattern + ')[\s]+' + \
-                                 '(?P<transaction_operations>)\;'
+    transaction_type_pattern = '(?P<transaction_type>[UR])'
+    transaction_id_pattern = '(?P<transaction_id>' + number_pattern + ')'
+    transaction_header_pattern = transaction_type_pattern + '[\s]+' + \
+                                 transaction_id_pattern + '[\s]+' + \
+                                 '(?P<transaction_operations>.*)\;[\s]*'
     transaction_line_pattern = '^' + transaction_header_pattern + '$'
+
+    scheduling_scheme_num = '(?P<scheduling_scheme_num>[12])'
+    num_of_transactions = '(?P<num_of_transactions>' + number_pattern + ')'
+    test_first_line_pattern = '^' + scheduling_scheme_num + '[\s]+' + num_of_transactions + '$'
 
 
 # Simulate the execution of a transaction.
@@ -130,6 +136,7 @@ class TransactionSimulator:
         transaction_line = transaction_line.strip()
         transaction_line_parser = regex.compile(TransactionParsingPatterns.transaction_line_pattern)
         parsed_transaction_line = transaction_line_parser.match(transaction_line)
+        print(transaction_line)
         assert parsed_transaction_line
         assert len(parsed_transaction_line.capturesdict()['transaction_id']) == 1
         transaction_id = int(parsed_transaction_line.capturesdict()['transaction_id'][0])
@@ -141,6 +148,7 @@ class TransactionSimulator:
         assert len(parsed_transaction_line.capturesdict()['transaction_operations']) == 1
         operations_str = parsed_transaction_line.capturesdict()['transaction_operations'][0].strip()
         operations_str += ' '  # the operations parser expects each operation to terminate with following spaces.
+        print(operations_str)
 
         transaction_simulator = TransactionSimulator(transaction_id, is_read_only)
 
@@ -154,11 +162,12 @@ class TransactionSimulator:
         return transaction_simulator
 
     def parse_and_add_operation(self, operation_str):
+        print(operation_str)
         read_operation_parser = regex.compile('^' + TransactionParsingPatterns.read_operation_pattern + '$')
         parsed_read_operation = read_operation_parser.match(operation_str)
-        write_operation_parser = regex.compile('^' + TransactionParsingPatterns.read_operation_pattern + '$')
+        write_operation_parser = regex.compile('^' + TransactionParsingPatterns.write_operation_pattern + '$')
         parsed_write_operation = write_operation_parser.match(operation_str)
-        commit_operation_parser = regex.compile('^' + TransactionParsingPatterns.read_operation_pattern + '$')
+        commit_operation_parser = regex.compile('^' + TransactionParsingPatterns.commit_operation_pattern + '$')
         parsed_commit_operation = commit_operation_parser.match(operation_str)
 
         number_of_parsed_op_types = bool(parsed_read_operation) + \
@@ -167,11 +176,11 @@ class TransactionSimulator:
         assert number_of_parsed_op_types == 1
 
         if parsed_read_operation:
-            local_var_identifier = parsed_read_operation.capturesdict['local_var_identifier']
+            local_var_identifier = parsed_read_operation.capturesdict()['local_var_identifier']
             assert len(local_var_identifier) == 1
             local_var_identifier = local_var_identifier[0]
 
-            var_identifier = parsed_read_operation.capturesdict['var_identifier']
+            var_identifier = parsed_read_operation.capturesdict()['var_identifier']
             assert len(var_identifier) == 1
             var_identifier = var_identifier[0]
 
@@ -179,11 +188,11 @@ class TransactionSimulator:
             self.add_read_operation_simulator(read_operation, local_var_identifier)
 
         elif parsed_write_operation:
-            var_identifier = parsed_read_operation.capturesdict['var_identifier']
+            var_identifier = parsed_write_operation.capturesdict()['var_identifier']
             assert len(var_identifier) == 1
             var_identifier = var_identifier[0]
 
-            write_value = parsed_read_operation.capturesdict['write_value']
+            write_value = parsed_write_operation.capturesdict()['write_value']
             assert len(write_value) == 1
             write_value = write_value[0]
 
@@ -317,12 +326,21 @@ class TransactionsWorkloadSimulator:
     # Parse the test file and add its contents to the simulator.
     def load_test_data(self, workload_data_filename):
         with open(workload_data_filename, 'r') as test_file:
-            test_first_line = test_file.readline()
-            # TODO: parse test first line
-            num_of_transactions = 88888  # TODO: parse from `test_first_line`
-            self._schedule = 'RR'  # TODO: parse from `test_first_line`
-            # TODO: verify each transaction is in new line
-            for transaction_line in test_file.readline():
+
+            # Parse test first line (scheduling scheme, number of transactions).
+            test_first_line = test_file.readline().strip()
+            test_first_line_parser = regex.compile(TransactionParsingPatterns.test_first_line_pattern)
+            parsed_test_first_line = test_first_line_parser.match(test_first_line)
+            assert parsed_test_first_line
+            assert len(parsed_test_first_line.capturesdict()['num_of_transactions']) == 1
+            num_of_transactions = int(parsed_test_first_line.capturesdict()['num_of_transactions'][0])
+            assert len(parsed_test_first_line.capturesdict()['scheduling_scheme_num']) == 1
+            scheduling_scheme_num = int(parsed_test_first_line.capturesdict()['scheduling_scheme_num'][0])
+            assert scheduling_scheme_num in {1, 2}
+            self._schedule = 'serial' if (scheduling_scheme_num == 1) else 'RR'
+
+            # Note: each transaction is promised to be contained in its own single line.
+            for transaction_line in test_file:
                 transaction_line = transaction_line.strip()
                 if not transaction_line:
                     continue  # ignore a blank line
