@@ -81,17 +81,23 @@ class TransactionParsingPatterns:
     const_value_pattern = number_pattern
     local_var_identifier_pattern = '(?P<local_var_identifier>' + identifier_pattern + ')'
     var_identifier_pattern = '(?P<var_identifier>' + identifier_pattern + ')'
+    optional_line_comment_pattern = '(?P<line_comment>((\/\/)|(\#)).*)?'
+
+    comment_line_pattern = '^[\s]*' + optional_line_comment_pattern + '$'
 
     scheduling_scheme_num = '(?P<scheduling_scheme_num>[12])'
     num_of_transactions = '(?P<num_of_transactions>' + number_pattern + ')'
-    test_first_line_pattern = '^' + scheduling_scheme_num + '[\s]+' + num_of_transactions + '$'
+    test_first_line_pattern = '^' + scheduling_scheme_num + \
+                              '[\s]+' + num_of_transactions + \
+                              '[\s]*' + optional_line_comment_pattern + '$'
 
     transaction_type_pattern = '(?P<transaction_type>[UR])'
     transaction_id_pattern = '(?P<transaction_id>' + number_pattern + ')'
     transaction_header_pattern = transaction_type_pattern + '[\s]+' + \
                                  transaction_id_pattern + '[\s]+' + \
-                                 '(?P<transaction_operations>.*)\;[\s]*'
-    transaction_line_pattern = '^' + transaction_header_pattern + '$'
+                                 '(?P<transaction_operations>.*)\;'
+    transaction_line_pattern = '^' + transaction_header_pattern + \
+                               '[\s]*' + optional_line_comment_pattern + '$'
 
     write_value_pattern = '(?P<write_value>' + local_var_identifier_pattern + '|' + const_value_pattern + ')'
     write_operation_pattern = '(w\(' + var_identifier_pattern + '[\s]*\,[\s]*' + write_value_pattern + '\))'
@@ -334,8 +340,11 @@ class TransactionsWorkloadSimulator:
     def load_test_data(self, workload_data_filename):
         with open(workload_data_filename, 'r') as test_file:
 
+            # Read comment lines before the test first line.
+            test_first_line = TransactionsWorkloadSimulator._read_first_line_that_is_not_comment(test_file)
+
             # Parse test first line (scheduling scheme, number of transactions).
-            test_first_line = test_file.readline().strip()
+            test_first_line = test_first_line.strip()
             test_first_line_parser = regex.compile(TransactionParsingPatterns.test_first_line_pattern)
             parsed_test_first_line = test_first_line_parser.match(test_first_line)
             assert parsed_test_first_line
@@ -351,10 +360,25 @@ class TransactionsWorkloadSimulator:
                 transaction_line = transaction_line.strip()
                 if not transaction_line:
                     continue  # ignore a blank line
+                if TransactionsWorkloadSimulator._is_comment_line(transaction_line):
+                    continue
                 transaction_simulator = TransactionSimulator.parse_transaction_from_test_line(transaction_line)
                 self._transaction_simulators.append(transaction_simulator)
                 self._transaction_id_to_transaction_simulator[transaction_simulator.transaction_id] = transaction_simulator
             assert num_of_transactions == len(self._transaction_simulators)
+
+    @staticmethod
+    def _is_comment_line(test_line):
+        comment_line_parser = regex.compile(TransactionParsingPatterns.comment_line_pattern)
+        parsed_comment_line = comment_line_parser.match(test_line)
+        return parsed_comment_line is not None
+
+    @staticmethod
+    def _read_first_line_that_is_not_comment(test_file):
+        for line in test_file:
+            if not TransactionsWorkloadSimulator._is_comment_line(line):
+                return line
+        return None
 
     # Given an scheduler, initiate the transactions (except for T0) in the scheduler.
     # For each transaction, add the first operation to it.
