@@ -49,7 +49,7 @@ class DoublyLinkedList:
         return new_node
 
     def insert_after_node(self, data, after_node: Node):
-        assert(isinstance(after_node, self.Node))
+        assert(after_node is None or isinstance(after_node, self.Node))
         if after_node is None:
             return self.push_front(data)
         assert(after_node.in_list == self)
