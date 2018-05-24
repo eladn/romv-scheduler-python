@@ -122,7 +122,7 @@ class LocksManager:
             # update the global write table and of the transaction that we got the lock
             self._write_locks_table[variable] = transaction_id
             if variable not in self._transactions_locks_sets[transaction_id][write]:
-                self._transactions_locks_sets[transaction_id][write].add(variable)
+                self._transactions_locks_sets[transaction_id][write].append(variable)
 
         return "GOT_LOCK"
 
@@ -239,9 +239,9 @@ class ROMVTransaction(Scheduler.ROTransaction):
 
 
 class UMVTransaction(Scheduler.UTransaction):
-    def __init__(self, *args, **kargs):
-        kargs['is_read_only'] = False
-        super().__init__(*args, **kargs)
+    def __init__(self, *args, **kwargs):
+        kwargs['is_read_only'] = False
+        super().__init__(*args, **kwargs)
         self._local_written_values = dict()  # TODO: is it ok to store them on memory only?
         # For each variable that the transaction updates, we store the previous version
         # of that variable. This data is needed for the GC mechanism. In order to know
