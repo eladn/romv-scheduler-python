@@ -1,0 +1,13 @@
+1 9
+U 0 w(x,3) w(y,7) w(z,10) c0;
+R 1 a0=r(x) c1;
+U 2 b2=r(z) w(x,b2) c2;
+R 3 c0=r(z) c1=r(z) c3;
+U 4 w(x,11) d2=r(y) d3=r(x) c4;
+R 5 e0=r(y) e1=r(x) e2=r(z) e3=r(z) e4=r(x) c5;
+U 6 w(x,13) w(z,14) c6;
+U 7 w(x,15) w(y,15) c7;
+R 8 b1=r(x) b2=r(z) c8;
+
+
+### check if it keeps the right versions
