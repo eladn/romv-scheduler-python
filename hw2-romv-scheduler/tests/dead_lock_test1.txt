@@ -2,28 +2,26 @@
 U 0 w(x,3) w(y,6) w(z,8) c0;
 U 1 a0=r(x) w(y,a0) a1=r(y) w(y,a1) a2=r(z) a3=r(y) c1;
 U 2 b0=r(y) b1=r(x) b2=r(z) w(x,b2) b4=r(z) b5=r(y) w(y, b4) c2;
-U 3 c0=r(z) c1=r(z) w(z,c1) c2=r(x) w(y,c2) w(z,c2) r(z) c3;
+U 3 c0=r(z) c1=r(z) w(z,c1) c2=r(x) w(y,c2) w(z,c2) c3=r(z) c3;
 R 4 d0=r(x) d1=r(z) d2=r(y) d3=r(x) c4;
 R 5 e0=r(y) e1=r(x) e2=r(z) e3=r(z) e4=r(x) c5;
 
-
-####when trying to run remove it
-U1:1     U2:1     U3:1      R4:1    R5:1
-U1:2     U2:RESET U3:2      R4:2    R5:2
-U1:3     U2:1WAIT U3:3      R4:3    R5:3
-U1:4     U2:1WAIT U3:4      R4:4    R5:4
-U1:5WAIT U2:1WAIT U3:RESET  R4:5    R5:5
-U1:5     U2:1WAIT U3:1              R5:6
-U1:6     U2:1WAIT U3:2
-U1:7     U2:1     U3:3
-         U2:2     U3:4
-         U2:3WAIT U3:5
-         U2:3WAIT U3:6
-         U2:3WAIT U3:7
-         U2:3WAIT U3:8
-         U2:3
-         U2:4
-         U2:5
-         U2:6
-         U2:7
-         U2:8
+# U1:1     U2:1     U3:1      R4:1    R5:1
+# U1:2     U2:RESET U3:2      R4:2    R5:2
+# U1:3     U2:1WAIT U3:3      R4:3    R5:3
+# U1:4     U2:1WAIT U3:4      R4:4    R5:4
+# U1:5WAIT U2:1WAIT U3:RESET  R4:5    R5:5
+# U1:5     U2:1WAIT U3:1              R5:6
+# U1:6     U2:1WAIT U3:2
+# U1:7     U2:1     U3:3
+#          U2:2     U3:4
+#          U2:3WAIT U3:5
+#          U2:3WAIT U3:6
+#          U2:3WAIT U3:7
+#          U2:3WAIT U3:8
+#          U2:3
+#          U2:4
+#          U2:5
+#          U2:6
+#          U2:7
+#          U2:8
