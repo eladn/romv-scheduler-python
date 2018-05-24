@@ -638,3 +638,6 @@ class ROMVScheduler(Scheduler):
             return False
         return reader.timestamp > after_ts  # FIXME: should be `>=` inequality or just `>`?
 
+    def get_variables(self):
+        return ()  # TODO: impl
+

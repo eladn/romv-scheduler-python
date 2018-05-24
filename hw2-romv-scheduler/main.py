@@ -11,13 +11,16 @@ DEFAULT_TEST_FILENAME = 'transactions.dat'
 def args_parser():
     parser = argparse.ArgumentParser(
         description='DB implementation [236510] / Simulator for ROMV transactions scheduler.')
-    parser.add_argument('--sched', '-s',
-                        type=str, nargs='?', choices=['RR', 'serial'],
-                        help='Scheduling scheme to use. `RR` for round-robin, or `serial` for serial scheduler. ' +
+    parser.add_argument('--force_serial', '-s',
+                        type=bool, nargs='?',
+                        help='Force using a simple serial scheduler. Used mostly for debugging. ' +
                         'If not specified, use the scheduling scheme mentioned in the test file.')
     parser.add_argument('--test', '-t',
                         type=str, nargs='?', default=DEFAULT_TEST_FILENAME,
                         help='Test file-name to use.')
+    parser.add_argument('--verbose', '-v',
+                        type=bool, nargs='?',
+                        help='Verbose mode. Use in order to print the variables values after each operation.')
     return parser.parse_args()
 
 
@@ -32,7 +35,7 @@ if __name__ == '__main__':
     # variables of the program, and might be used later for as a value to write in a
     # write-operation. The simulator is also responsible for restarting a transaction
     # that ahs been aborted by the scheduler (due to a deadlock).
-    simulator = TransactionsWorkloadSimulator()
+    simulator = TransactionsWorkloadSimulator(args.verbose)
 
     # Parse the workload test file and add its contents to the simulator.
     simulator.load_test_data(args.test)
@@ -41,10 +44,7 @@ if __name__ == '__main__':
     # By default use the scheduling scheme mentioned in the test file.
     # If a certain scheduling scheme mentioned explicitly in the arguments, use it.
     schedule_scheme = simulator.schedule
-    if args.sched:
-        schedule_scheme = args.sched
-    scheduler_type = ROMVScheduler if schedule_scheme == 'RR' else SerialScheduler
-    scheduler = scheduler_type(schedule_scheme)
+    scheduler = ROMVScheduler(schedule_scheme) if not args.force_serial else SerialScheduler()
 
     # Firstly, completely run the first transaction (T0), to fill the variables with some initial value.
     simulator.add_initialization_transaction_to_scheduler(scheduler)

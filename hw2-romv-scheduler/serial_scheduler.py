@@ -16,3 +16,6 @@ class SerialScheduler(Scheduler):
 
     def try_read(self, transaction_id, variable):
         pass  # TODO: impl
+
+    def get_variables(self):
+        pass  # TODO: impl

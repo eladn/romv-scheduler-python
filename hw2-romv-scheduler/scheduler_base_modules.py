@@ -432,6 +432,13 @@ class Scheduler(ABC):
     def try_read(self, transaction_id, variable):
         ...
 
+    # May be called by the user in order to iterate over the values of the variables in the DB.
+    # Should return an iterable type of pairs (variable_name, latest_value) or (variable_name, list_of_versions)
+    # We use it in order to print values in debug mode.
+    @abstractmethod
+    def get_variables(self):
+        ...
+
 
 # For the GC mechanism we sometimes have to store a set of variables. We see later
 # why and how we do it. The catch is that we only relay on the No-False-Negative

@@ -1,19 +1,25 @@
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
 from scheduler_base_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
+from logger import Logger
 
 
 # Used to print the status to output log.
 class SchedulerExecutionLogger:
     @staticmethod
     def transaction_reset(transaction_simulator):
-        print("{trans} reset".format(trans=transaction_simulator.to_log_str()))
+        Logger().log("{trans} reset".format(trans=transaction_simulator.to_log_str()))
 
     @staticmethod
     def transaction_action(transaction_simulator, operation_simulator):
-        print("{trans} action {action_no}{waiting}".format(
+        Logger().log("{trans} action {action_no}{waiting}".format(
             trans=transaction_simulator.to_log_str(),
             action_no=operation_simulator.operation_number,
             waiting=(' WAITING' if operation_simulator.operation.is_completed else '')))
+
+    @staticmethod
+    def print_variables(scheduler: Scheduler):
+        Logger().log('Variables: {}'.format(list(scheduler.get_variables())),
+                     log_type_name='scheduler_simulator_verbose')
 
 
 # Operation simulator is responsible for storing an operation to perform.
@@ -186,6 +192,7 @@ class TransactionSimulator:
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
+        SchedulerExecutionLogger.print_variables(scheduler)
 
     def operation_failed(self, scheduler: Scheduler, operation: Operation):
         assert len(self._ongoing_operation_simulators_queue) > 0
@@ -194,6 +201,7 @@ class TransactionSimulator:
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
+        SchedulerExecutionLogger.print_variables(scheduler)
 
     def transaction_aborted(self, scheduler: Scheduler):
         assert self._transaction is not None
@@ -201,6 +209,7 @@ class TransactionSimulator:
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_reset(self)
+        SchedulerExecutionLogger.print_variables(scheduler)
 
         self.reset_transaction(scheduler)
 
@@ -216,10 +225,12 @@ class TransactionSimulator:
 
 # Parse the input test file and add transactions and their operations to the given scheduler.
 class TransactionsWorkloadSimulator:
-    def __init__(self):
+    def __init__(self, verbose=False):
         self._transaction_simulators = []
         self._transaction_id_to_transaction_simulator = dict()  # FIXME: maybe we don't need it
         self._schedule = 'RR'
+        if not verbose:
+            Logger().turn_off('scheduler_simulator_verbose')
 
     @property
     def schedule(self):
