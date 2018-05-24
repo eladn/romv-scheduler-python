@@ -188,9 +188,9 @@ class MultiVersionDataManager:
         flag_remove_found = False
         if variable in self._versions_dict_by_variables.keys():
             for (value, ts) in reversed(self._versions_dict_by_variables[variable]):
-                if promised_newer_version_in_timespan['from_ts'] > ts > promised_newer_version_in_timespan['to_ts']:
+                if promised_newer_version_in_timespan.from_ts > ts > promised_newer_version_in_timespan.to_ts:
                     flag_promised = True
-                if remove_versions_in_timespan['from_ts'] > ts > remove_versions_in_timespan['to_ts']:
+                if remove_versions_in_timespan.from_ts > ts > remove_versions_in_timespan.to_ts:
                     flag_remove_found = True
                     if flag_promised:
                         self._versions_dict_by_variables[variable].remove((value, ts))
@@ -422,7 +422,7 @@ class MultiVersionGC:
     def run_waiting_gc_jobs(self, scheduler):
         nr_gc_jobs = len(self._gc_jobs_queue)
         for job_nr in range(nr_gc_jobs):
-            gc_job = self._gc_jobs_queue.pop(index=0)
+            gc_job = self._gc_jobs_queue.pop(0)
             # remove the relevant versions (in the timespan to remove) of the variables to check!
             for variable in gc_job.variables_to_check:
                 versions_to_remove_exist, promised_newer_versions_exist = \
@@ -522,6 +522,7 @@ class ROMVScheduler(Scheduler):
                     transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
+                self._mv_gc.run_waiting_gc_jobs(self)
 
     # TODO: doc!
     def try_write(self, transaction_id, variable, value):
