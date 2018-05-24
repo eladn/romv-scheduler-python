@@ -18,10 +18,12 @@ class DoublyLinkedList:
         self.count = 0
 
     def peek_front(self):
-        return self.first
+        assert self.first is not None
+        return self.first.data
 
     def peek_back(self):
-        return self.last
+        assert self.last is not None
+        return self.last.data
 
     def push_front(self, data):
         # create a new node
