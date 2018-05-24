@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
     NoFalseNegativeVariablesSet, Timespan
 import networkx as nx
@@ -41,103 +41,81 @@ class DeadlockDetector:
 
 
 class LocksManager:
+    # TransactionLocksSet = namedtuple('TransactionLocksSet', ['read_locks', 'write_locks'])
+    class TransactionLocksSet:
+        def __init__(self):
+            self.read_locks = set()
+            self.write_locks = set()
+
     def __init__(self):
         self._deadlock_detector = DeadlockDetector()
 
         # locks table fields (read locks multiset + write locks set)
         # our multiset would be a dict ! for each key will count the amount of its duplications.
         # dict : key - transaction id, value - tuple(read,write)
-        self._transactions_locks_sets = dict()
+        self._transactions_locks_sets = defaultdict(LocksManager.TransactionLocksSet)  # { transaction_id: TransactionLocksSet }
         # the read locks table : the key is the variable to lock
-        #                        the value is how many locks it has at the moment
-        self._read_locks_table = dict()
+        #                        the value is a set of who locks it at the moment
+        self._read_locks_table = defaultdict(set)
         # the write locks table : the key is the variable to lock
         #                         the value is what transaction currently locks the variable
         self._write_locks_table = dict()
 
-    # helper function for try_acquire_lock :
-    # return WAIT if the curr transaction can wait on the transaction holding the lock without a deadlock
-    # returns DEADLOCK if the curr transaction cant wait on the transaction holding the lock without a deadlock
-    # returns NEXT if the curr transaction is the one who hold the key on the variable
-    def check_deadlock_at_given_table(self, table, variable, transaction_id):
-        depends_on = table[variable]
-        if depends_on != transaction_id:  # if it is the same transaction - no change is needed
-            if self._deadlock_detector.wait_for(transaction_id, depends_on):
-                return "WAIT"
-            else:
-                return "DEADLOCK"
-        return "NEXT"
+    def _collides_with(self, transaction_id, variable, read_or_write):
+        assert read_or_write in {'read', 'write'}
+        if variable in self._write_locks_table:
+            assert len(self._read_locks_table[variable]) == 0 \
+                   or self._read_locks_table[variable] == {self._write_locks_table[variable]}
+            if self._write_locks_table[variable] == transaction_id:
+                return None
+            return {self._write_locks_table[variable]}
+        if variable in self._read_locks_table and read_or_write == 'write':
+            readers_without_me = self._read_locks_table[variable].difference({transaction_id})
+            if len(readers_without_me) > 0:
+                return readers_without_me
+        return None
 
     # Returns:
     #   "GOT_LOCK" the lock has been acquired successfully (or the transaction also has the lock).
     #   "WAIT" is the lock could not be acquired now (someone else is holding it, but there is no dependency cycle).
     #   "DEADLOCK" if a deadlock will be created if the transaction would wait for this wanted lock.
-
-    # we identify deadlocks here
     def try_acquire_lock(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
-        read = 0
-        write = 1
-        if read_or_write == "read":
-
-            if transaction_id not in self._transactions_locks_sets:
-                # when the transaction is new
-                self._transactions_locks_sets[transaction_id] = (set(), set())
-
-            if variable in self._write_locks_table.keys():
-                # if the variable is already in the write locks table
-                # checks if there is a dead lock for holding another write key on the var
-                answer = self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
-                if answer != "NEXT":
-                    return answer
-
-            else:  # when the var is not in the write locks table (free)
-                if variable not in self._transactions_locks_sets[transaction_id][read]:
-                    # if we dont have a lock on it in the curr transaction - add it
-                    self._transactions_locks_sets[transaction_id][read].add(variable)
-            # update the global read locks table - that we got the lock
-            if variable in self._read_locks_table.keys():
-                self._read_locks_table[variable] += 1
+        collides_with = self._collides_with(transaction_id, variable, read_or_write)
+        if collides_with is None:
+            if read_or_write == 'read':
+                self._read_locks_table[variable].add(transaction_id)
+                self._transactions_locks_sets[transaction_id].read_locks.add(variable)
             else:
-                self._read_locks_table[variable] = 1
+                assert variable not in self._write_locks_table or self._write_locks_table[variable] == transaction_id
+                self._write_locks_table[variable] = transaction_id
+                self._transactions_locks_sets[transaction_id].write_locks.add(variable)
+            return 'GOT_LOCK'
+        assert isinstance(collides_with, set) and len(collides_with) > 0
+        for wait_for_tid in collides_with:
+            deadlock_detected = self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
+            if deadlock_detected:
+                return 'DEADLOCK'
+        return 'WAIT'
 
-        if read_or_write == "write":
-            if transaction_id not in self._transactions_locks_sets:
-                # when the transaction is new
-                self._transactions_locks_sets[transaction_id] = (set(), set())
-
-            if variable in self._write_locks_table.keys():
-                # if there is already a write lock on that lock - check if it will deadlock if we wait on it
-                answer = self.check_deadlock_at_given_table(self._write_locks_table, variable, transaction_id)
-                if answer != "NEXT":
-                    return answer
-
-            else:  # when the var have no write lock on it
-                if variable in self._read_locks_table.keys():
-                    # if the var have read lock on it - check if waiting on it wont case a dead lock - return accordingly
-                    answer = self.check_deadlock_at_given_table(self._read_locks_table, variable, transaction_id)
-                    if answer != "NEXT":
-                        return answer
-
-            # update the global write table and of the transaction that we got the lock
-            self._write_locks_table[variable] = transaction_id
-            if variable not in self._transactions_locks_sets[transaction_id][write]:
-                self._transactions_locks_sets[transaction_id][write].add(variable)
-
-        return "GOT_LOCK"
-
-    # when transaction_id is done and wants to release all of its locks
+    # when transaction_id is done, we release all of its acquired locks and remove it from the "wait-for" graph.
     def release_all_locks(self, transaction_id):
+        # remove the just-ended-transaction from the "wait-for" graph.
         self._deadlock_detector.transaction_ended(transaction_id)
-        # remove the locks from the data structures : self._read_locks_table ,self._write_locks_table
-        readlist, writelist = self._transactions_locks_sets[transaction_id]
-        for readI in readlist:
-            self._read_locks_table[readI] -= 1
-            if self._read_locks_table[readI] == 0:
-                self._read_locks_table.pop(readI)
-        for writeI in writelist:
-            self._write_locks_table.pop(writeI)  # we pop the variable from the dict - remove it completely
-        # remove the transaction data of the global transactions dict
+
+        # remove the locks from the data structures: self._read_locks_table, self._write_locks_table
+        for read_var in self._transactions_locks_sets[transaction_id].read_locks:
+            assert read_var in self._read_locks_table
+            assert transaction_id in self._read_locks_table[read_var]
+            self._read_locks_table[read_var].remove(transaction_id)
+            if len(self._read_locks_table[read_var]) == 0:
+                self._read_locks_table.pop(read_var)
+
+        for write_var in self._transactions_locks_sets[transaction_id].write_locks:
+            assert write_var in self._write_locks_table
+            assert transaction_id == self._write_locks_table[write_var]
+            self._write_locks_table.pop(write_var)
+
         self._transactions_locks_sets.pop(transaction_id)
 
     # returns if there is a deadlock at the moment
@@ -529,7 +507,8 @@ class ROMVScheduler(Scheduler):
                     transaction.timestamp = self._timestamps_manager.get_next_ts()
                     transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
-                self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
+                # TODO: remove the comment from the following line and fix the GC !
+                # self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
 
     # TODO: doc!
     def try_write(self, transaction_id, variable, value):
@@ -575,9 +554,9 @@ class ROMVScheduler(Scheduler):
             # TODO: maybe abort another transaction?
             self.abort_transaction(transaction)  # FIXME: is it ok to call it here?
             assert not self._locks_manager.is_deadlock()
-            return False  # failed
+            return None  # failed
         elif got_lock == 'WAIT':
-            return False  # failed
+            return None  # failed
 
         assert got_lock == 'GOT_LOCK'
         # FIXME: is this "local-storing" mechanism ok?
