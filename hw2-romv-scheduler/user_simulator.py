@@ -247,20 +247,20 @@ class TransactionSimulator:
     def add_write_operation_simulator(self, write_operation: WriteOperation, src_variable_name_or_const_val):
         assert self._execution_attempt_no == 0 and self._transaction is None
         operation_simulator = WriteOperationSimulator(write_operation,
-                                                      len(self._all_operation_simulators),  # FIXME: add one?
+                                                      len(self._all_operation_simulators) + 1,
                                                       src_variable_name_or_const_val)
         self._all_operation_simulators.append(operation_simulator)
 
     def add_read_operation_simulator(self, read_operation: ReadOperation, dest_variable_name):
         assert self._execution_attempt_no == 0 and self._transaction is None
         operation_simulator = ReadOperationSimulator(read_operation,
-                                                     len(self._all_operation_simulators),  # FIXME: add one?
+                                                     len(self._all_operation_simulators) + 1,
                                                      dest_variable_name)
         self._all_operation_simulators.append(operation_simulator)
 
     def add_commit_operation_simulator(self, commit_operation: CommitOperation):
         assert self._execution_attempt_no == 0 and self._transaction is None
-        operation_simulator = OperationSimulator(commit_operation, len(self._all_operation_simulators))  # FIXME: add one?
+        operation_simulator = OperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
         self._all_operation_simulators.append(operation_simulator)
 
     def add_next_operation_to_transaction_if_needed(self):
