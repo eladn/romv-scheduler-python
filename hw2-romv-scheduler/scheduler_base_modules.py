@@ -75,7 +75,7 @@ class WriteOperation(Operation):
 
 class ReadOperation(Operation):
     def __init__(self, variable):
-        super().__init__(operation_type='write',
+        super().__init__(operation_type='read',
                          variable=variable)
         self._read_value = None  # Only for `read` operations. After a value has been read it would be assigned here.
 
@@ -223,7 +223,7 @@ class Transaction:
             self._on_operation_failed_callback(self, scheduler, next_operation)
             return next_operation
 
-        queue_head = self._waiting_operations_queue.pop(index=0)
+        queue_head = self._waiting_operations_queue.pop(0)  # remove the list head
         assert queue_head == next_operation
         if next_operation.get_type() == 'commit':
             self._is_completed = True
@@ -314,7 +314,9 @@ class Scheduler(ABC):
         # Add the transaction to the correct place in the transactions list
         # sorted by transaction id.
         insert_after_transaction = self._find_transaction_with_maximal_tid_lower_than(transaction.transaction_id)
-        insert_after_transaction_node = insert_after_transaction.transactions_by_tid_list_node
+        insert_after_transaction_node = None
+        if insert_after_transaction is not None:
+            insert_after_transaction_node = insert_after_transaction.transactions_by_tid_list_node
         node = self._ongoing_transactions_by_tid.insert_after_node(transaction, insert_after_transaction_node)
         transaction.transactions_by_tid_list_node = node
 

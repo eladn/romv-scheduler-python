@@ -15,7 +15,7 @@ class SchedulerExecutionLogger:
         Logger().log("{trans} action {action_no}{waiting}".format(
             trans=transaction_simulator.to_log_str(),
             action_no=operation_simulator.operation_number,
-            waiting=(' WAITING' if operation_simulator.operation.is_completed else '')))
+            waiting=('' if operation_simulator.operation.is_completed else ' WAITING')))
 
     @staticmethod
     def print_variables(scheduler: Scheduler):
@@ -138,7 +138,7 @@ class TransactionSimulator:
         transaction_line = transaction_line.strip()
         transaction_line_parser = regex.compile(TransactionParsingPatterns.transaction_line_pattern)
         parsed_transaction_line = transaction_line_parser.match(transaction_line)
-        print(transaction_line)
+
         assert parsed_transaction_line
         assert len(parsed_transaction_line.capturesdict()['transaction_id']) == 1
         transaction_id = int(parsed_transaction_line.capturesdict()['transaction_id'][0])
@@ -150,7 +150,6 @@ class TransactionSimulator:
         assert len(parsed_transaction_line.capturesdict()['transaction_operations']) == 1
         operations_str = parsed_transaction_line.capturesdict()['transaction_operations'][0].strip()
         operations_str += ' '  # the operations parser expects each operation to terminate with following spaces.
-        print(operations_str)
 
         transaction_simulator = TransactionSimulator(transaction_id, is_read_only)
 
@@ -164,7 +163,6 @@ class TransactionSimulator:
         return transaction_simulator
 
     def parse_and_add_operation(self, operation_str):
-        print(operation_str)
         read_operation_parser = regex.compile('^' + TransactionParsingPatterns.read_operation_pattern + '$')
         parsed_read_operation = read_operation_parser.match(operation_str)
         write_operation_parser = regex.compile('^' + TransactionParsingPatterns.write_operation_pattern + '$')
@@ -275,11 +273,12 @@ class TransactionSimulator:
             next_operation_simulator.operation.to_write_value = value_to_write
         self._transaction.add_operation(next_operation_simulator.operation)
 
-    def operation_completed(self, scheduler: Scheduler, operation: Operation):
+    def operation_completed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
         assert len(self._ongoing_operation_simulators_queue) > 0
-        operation_simulator = self._ongoing_operation_simulators_queue.pop(index=0)
+        operation_simulator = self._ongoing_operation_simulators_queue.pop(0)  # remove list head
         assert(operation == operation_simulator.operation)
         if operation.get_type() == 'read':
+            assert isinstance(operation, ReadOperation)
             dest_local_var_name = operation_simulator.dest_local_variable_name
             self._local_variables[dest_local_var_name] = operation.read_value
         self.add_next_operation_to_transaction_if_needed()
@@ -288,16 +287,17 @@ class TransactionSimulator:
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
         SchedulerExecutionLogger.print_variables(scheduler)
 
-    def operation_failed(self, scheduler: Scheduler, operation: Operation):
+    def operation_failed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
+        assert not operation.is_completed
         assert len(self._ongoing_operation_simulators_queue) > 0
-        operation_simulator = self._ongoing_operation_simulators_queue.pop(index=0)
+        operation_simulator = self._ongoing_operation_simulators_queue[0]
         assert(operation == operation_simulator.operation)
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
         SchedulerExecutionLogger.print_variables(scheduler)
 
-    def transaction_aborted(self, scheduler: Scheduler):
+    def transaction_aborted(self, transaction: Transaction, scheduler: Scheduler):
         assert self._transaction is not None
         assert self._transaction.is_aborted
 
