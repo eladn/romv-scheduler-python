@@ -2,6 +2,7 @@ from collections import namedtuple, defaultdict
 from scheduler_base_modules import Scheduler, Transaction, Timestamp, TimestampsManager,\
     NoFalseNegativeVariablesSet, Timespan
 from logger import Logger
+import copy  # for deep-coping the disk in order to add the yet-committed variables so they could be printed to run-log.
 import networkx as nx
 assert int(nx.__version__.split('.')[0]) >= 2
 
@@ -194,6 +195,10 @@ class MultiVersionDataManager:
                     if flag_promised:
                         self._versions_dict_by_variables[variable].remove((value, ts))
         return flag_remove_found, flag_promised
+
+    # Used for printing all of the variables to the run-log for debugging purposes.
+    def get_variables(self):
+        return self._versions_dict_by_variables.items()
 
 
 class ROMVTransaction(Scheduler.ROTransaction):
@@ -622,6 +627,17 @@ class ROMVScheduler(Scheduler):
             return False
         return reader.timestamp > after_ts  # FIXME: should be `>=` inequality or just `>`?
 
+    # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
-        return ()  # TODO: impl
+        # TODO: if we use inner disk storage of a write transaction - do not do this!
+        variables = copy.deepcopy(dict(self._mv_data_manager.get_variables()))
+        for transaction in self._ongoing_u_transactions_by_arrival:
+            assert isinstance(transaction, UMVTransaction)
+            if transaction.is_aborted:
+                continue
+            for var, new_uncommitted_version in transaction._local_written_values.items():
+                if var not in variables:
+                    variables[var] = []
+                variables[var].append((new_uncommitted_version, 'uncommitted'))
+        return variables.items()
 

@@ -21,7 +21,7 @@ def args_parser():
                         type=str, nargs='*',
                         help='Test file-names to use.')
     parser.add_argument('--verbose', '-v',
-                        type=bool, nargs='?',
+                        type=bool, nargs='?', default=True,
                         help='Verbose mode. Use in order to print the variables values after each operation.')
     return parser.parse_args()
 
@@ -73,5 +73,6 @@ if __name__ == '__main__':
         test_files = [os.path.join(TESTS_DIR, filename)
                       for filename in os.listdir(TESTS_DIR)
                       if os.path.isfile(os.path.join(TESTS_DIR, filename))]
+    # test_files = ['tests/basic-deadlock-test.txt']
     for test_file_path in test_files:
         run_scheduling_test(args, test_file_path)
