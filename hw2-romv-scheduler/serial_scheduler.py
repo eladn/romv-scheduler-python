@@ -11,7 +11,7 @@ class SerialScheduler(Scheduler):
 
     def run(self):
         for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
-            operation = transaction.try_perform_next_operation()
+            operation = transaction.try_perform_next_operation(self)
             assert operation.is_completed
             if transaction.is_completed:
                 self.mark_transaction_to_remove(transaction)
