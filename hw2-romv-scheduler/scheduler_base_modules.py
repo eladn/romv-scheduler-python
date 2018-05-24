@@ -359,8 +359,10 @@ class Scheduler(ABC):
             self._ongoing_ro_transactions_by_arrival.remove_node(transaction_to_remove.ro_transactions_by_arrival_list_node)
         else:
             self._ongoing_u_transactions_by_arrival.remove_node(transaction_to_remove.u_transactions_by_arrival_list_node)
-        if transaction_to_remove.transaction_id in self._ongoing_transactions_mapping:
-            del self._ongoing_transactions_mapping[transaction_to_remove.transaction_id]
+        # TODO: doc the following check.
+        if transaction_to_remove.transaction_id in self._ongoing_transactions_mapping and \
+                self._ongoing_transactions_mapping[transaction_to_remove.transaction_id] is transaction_to_remove:
+            self._ongoing_transactions_mapping.pop(transaction_to_remove.transaction_id)
 
     def get_transaction_by_id(self, transaction_id):
         if transaction_id in self._ongoing_transactions_mapping:
