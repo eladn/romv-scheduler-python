@@ -104,7 +104,7 @@ class LocksManager:
         if read_or_write == "write":
             if transaction_id not in self._transactions_locks_sets:
                 # when the transaction is new
-                self._transactions_locks_sets[transaction_id] = ([], [])
+                self._transactions_locks_sets[transaction_id] = (set(), set())
 
             if variable in self._write_locks_table.keys():
                 # if there is already a write lock on that lock - check if it will deadlock if we wait on it
@@ -122,7 +122,7 @@ class LocksManager:
             # update the global write table and of the transaction that we got the lock
             self._write_locks_table[variable] = transaction_id
             if variable not in self._transactions_locks_sets[transaction_id][write]:
-                self._transactions_locks_sets[transaction_id][write].append(variable)
+                self._transactions_locks_sets[transaction_id][write].add(variable)
 
         return "GOT_LOCK"
 
@@ -528,7 +528,7 @@ class ROMVScheduler(Scheduler):
                     assert isinstance(transaction, UMVTransaction)
                     transaction.timestamp = self._timestamps_manager.get_next_ts()
                     transaction.complete_writes(self._mv_data_manager)
-                self._locks_manager.release_all_locks(transaction.transaction_id)
+                    self._locks_manager.release_all_locks(transaction.transaction_id)
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
 
     # TODO: doc!
