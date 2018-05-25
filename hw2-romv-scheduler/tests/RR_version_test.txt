@@ -2,7 +2,7 @@
 U 0 w(x,3) w(y,7) w(z,10) c0;
 R 1 a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) a0=r(x) c1;
 U 2 w(x,19) c2;
-U 3 w(y,18) b0=r(z) w(y,b0) c3;
+U 3 w(y,18) b0=r(y) w(y,17) c3;
 R 4 c0=r(z) c1=r(z) c2=r(y) c3=r(z) c4;
 U 5 w(z,17) w(z,9) w(y,9) c5;
 R 6 d0=r(x) d0=r(x) d0=r(x) d1=r(z) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d2=r(y) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) c6;
@@ -13,26 +13,25 @@ R 6 d0=r(x) d0=r(x) d0=r(x) d1=r(z) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d2=r
 # local var values {a0=3,c0=10,d0=3}
 #
 # R1:2 U2:2 U3:2 R4:2 U5:2 R6:2
-# versions after round : {("x",[("3",1),("19",4)]),("y",[("7",1),("18",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
-# local var values {a0=3,c0=10,d0=3,b0=17,C1=10}
+# versions after round : {("x",[("3",1),("19",5)]),("y",[("7",1),("18",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
+# local var values {a0=3,c0=10,d0=3,b0=7,C1=10}
 #
 # R1:3      U3:3 R4:3 U5:3WAIT R6:3
-# versions after round : {("x",[("3",1),("19",4)]),("y",[("7",1),("17",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
-# local var values {a0=3,c0=10,d0=3,b0=17,C1=10,C2=7}
+# versions after round : {("x",[("3",1),("19",5)]),("y",[("7",1),("17",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
+# local var values {a0=3,c0=10,d0=3,b0=7,C1=10,C2=7}
 #
 # R1:4      U3:4 R4:4 U5:3 R6:4
-# versions after round : {("x",[("3",1),("19",4)]),("y",[("7",1),("17",5),("9",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
-# local var values {a0=3,c0=10,d0=3,b0=17,C1=10,C2=7,C3=10,d1=10}
+# versions after round : {("x",[("3",1),("19",5)]),("y",[("7",1),("17",6),("9",'uncommitted')]),("z",[("10",1),("9",'uncommitted')])}
+# local var values {a0=3,c0=10,d0=3,b0=7,C1=10,C2=7,C3=10,d1=10}
 #
 # R1:5           R4:5 U5:4 R6:5
 # no reader was born in between U5 commit and the last commit - run over the value of prev y
-# versions after round : {("x",[("3",1),("19",4)]),("y",[("7",1),("9",6)]),("z",[("10",1),("9",6)])}
-# local var values {a0=3,d0=3,b0=17,d1=10}
+# versions after round : {("x",[("3",1),("19",5)]),("y",[("7",1),("9",7)]),("z",[("10",1),("9",7)])}
+# local var values {a0=3,d0=3,b0=7,d1=10}
 #
 # R1:6                      R6:5
 ### from here until the last one is done :
-## versions after rounds : {("x",[("3",1),("19",4)]),("y",[("7",1),("9",6)]),("z",[("10",1),("9",6)])}
+## versions after rounds : {("x",[("3",1),("19",5)]),("y",[("7",1),("9",7)]),("z",[("10",1),("9",7)])}
 #
 # after the last one is done :
-# versions after round : {("x",[("19",4)]),("y",[("9",6)]),("z",[("9",6)])}
-
+# versions after round : {("x",[("19",5)]),("y",[("9",7)]),("z",[("9",7)])}
