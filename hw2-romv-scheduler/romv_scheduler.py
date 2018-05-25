@@ -268,6 +268,10 @@ class UMVTransaction(Scheduler.UTransaction):
         self._committed_variables_latest_versions_before_update = None
 
     @property
+    def committed_variables(self):
+        return self._local_written_values.keys()
+
+    @property
     def committed_variables_latest_versions_before_update(self):
         assert self._committed_variables_latest_versions_before_update is not None
         return self._committed_variables_latest_versions_before_update
@@ -466,6 +470,12 @@ class MultiVersionGC:
             Logger().log('     Add GC job because of updater committed variable `{variable}` with version ({new_version}) and there is no active reader since previous version ({prev_version}) of {variable}.'.format(variable=variable, new_version=committed_update_transaction.timestamp, prev_version=prev_version), log_type_name='gc')
             self._gc_jobs_queue.append(gc_job)
 
+        # Add the committed variables to the responsibility set of the youngest older read-only transaction.
+        committed_variables_set = self._get_committed_variables_set_after_transaction_and_before_next(
+            committed_update_transaction, scheduler)
+        for variable in committed_update_transaction.committed_variables:
+            committed_variables_set.add_variable(variable)
+
     # Called by the scheduler each time a transaction is committed.
     def transaction_committed(self, transaction: Transaction, scheduler):
         if transaction.is_read_only:
@@ -520,6 +530,13 @@ class MultiVersionGC:
         assert (after_reader.is_finished and responsibility_timespan.from_ts < after_reader.timestamp) or \
                (not after_reader.is_finished and responsibility_timespan.from_ts == after_reader.timestamp)
         return younger_transaction, younger_transaction.committed_variables_set_since_last_reader_born, responsibility_timespan
+
+    def _get_committed_variables_set_after_transaction_and_before_next(self, after_transaction: Transaction, scheduler):
+        younger_transaction = scheduler.get_read_transaction_younger_than(after_transaction)
+        if younger_transaction is None:
+            return self._committed_variables_set_since_younger_reader_born
+        assert isinstance(younger_transaction, ROMVTransaction)
+        return younger_transaction.committed_variables_set_since_last_reader_born
 
 
 # TODO: fully doc it!
