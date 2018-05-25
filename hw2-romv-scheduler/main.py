@@ -65,6 +65,9 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     simulator.add_initialization_transaction_to_scheduler(scheduler)
     scheduler.run()
 
+    # Print a blank line after the initialization.
+    Logger().log()
+
     # Run the transactions T1-Tn using the chosen scheduling scheme.
     # After an operation is completed for a certain transaction, the simulator would immediately spawn
     # the next operation (if there is one) to the transaction. The next time the scheduler would encounter
