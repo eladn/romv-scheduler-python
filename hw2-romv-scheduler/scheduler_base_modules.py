@@ -146,7 +146,8 @@ class Transaction:
     def __init__(self, transaction_id, is_read_only: bool=False,
                  on_operation_complete_callback=None,
                  on_operation_failed_callback=None,
-                 on_transaction_aborted_callback=None):
+                 on_transaction_aborted_callback=None,
+                 ask_user_for_next_operation_callback=None):
         self._transaction_id = transaction_id
         self._is_read_only = is_read_only
         self._waiting_operations_queue = []  # list of instances of `Operation`.
@@ -160,6 +161,9 @@ class Transaction:
         self._on_operation_failed_callback = on_operation_failed_callback
         # To be called after a transaction has been aborted by the scheduler.
         self._on_transaction_aborted_callback = on_transaction_aborted_callback
+        # To be called by the scheduler when the waiting operations queue is empty and
+        # `has_waiting_operation_to_perform()` is called (it is called by the scheduler inside of `run()`.
+        self._ask_user_for_next_operation_callback = ask_user_for_next_operation_callback
 
         # Transactions are stored in a list, stored by transaction id, so that the scheduler can
         # iterate over the transactions by the order of their transaction id.
@@ -203,11 +207,25 @@ class Transaction:
         assert self._timestamp is None  # can be set only once in a life of a transaction.
         self._timestamp = ts
 
+    @property
+    def has_timestamp(self):
+        return self._timestamp is not None
+
     def peek_next_operation(self):
         assert len(self._waiting_operations_queue) > 0
         return self._waiting_operations_queue[0]
 
-    # Always return the operation that we tried to perform.
+    def ask_user_for_next_operation(self, scheduler):
+        if self._ask_user_for_next_operation_callback is not None:
+            self._ask_user_for_next_operation_callback(self, scheduler)
+
+    def has_waiting_operation_to_perform(self, scheduler):
+        if len(self._waiting_operations_queue) < 1:
+            self.ask_user_for_next_operation(scheduler)
+        return len(self._waiting_operations_queue) > 0
+
+    # Returns the operation that we tried to perform (if exists one in the waiting queue).
+    # If there is no operation in the operations waiting queue, ask the user for one.
     # To check whether it has been performed, use `operation.is_completed`.
     def try_perform_next_operation(self, scheduler):
         assert len(self._waiting_operations_queue) > 0
@@ -306,6 +324,10 @@ class Scheduler(ABC):
         # In the `operation.try_perform()` we might need to retrieve the transaction instance.
         # It is done by calling `scheduler.get_transaction_by_id(tid)` that is using this mapping.
         self._ongoing_transactions_mapping = dict()
+
+    @property
+    def scheduling_scheme(self):
+        return self._scheduling_scheme
 
     def add_transaction(self, transaction: Transaction):
         assert not transaction.is_completed and not transaction.is_aborted

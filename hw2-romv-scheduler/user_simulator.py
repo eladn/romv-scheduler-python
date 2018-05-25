@@ -15,7 +15,7 @@ class SchedulerExecutionLogger:
         Logger().log("{trans} action {action_no}{waiting}".format(
             trans=transaction_simulator.to_log_str(),
             action_no=operation_simulator.operation_number,
-            waiting=('' if operation_simulator.operation.is_completed else ' WAITING')))
+            waiting=('' if operation_simulator.operation is None or operation_simulator.operation.is_completed else ' WAITING')))
 
     @staticmethod
     def print_variables(scheduler: Scheduler):
@@ -72,6 +72,11 @@ class WriteOperationSimulator(OperationSimulator):
         return local_variables[self._src_local_variable_name]
 
 
+class SuspendOperationSimulator(OperationSimulator):
+    def __init__(self, operation_number: int):
+        super().__init__(None, operation_number)
+
+
 # Collection of patterns used for parsing the input workload test file.
 # Used by the method: TransactionSimulator.parse_transaction_from_test_line(..)
 # Used by the method: TransactionSimulator.parse_and_add_operation(..)
@@ -105,8 +110,9 @@ class TransactionParsingPatterns:
                              '[\s]*\=[\s]*' + \
                              'r\(' + var_identifier_pattern + '\))'
     commit_operation_pattern = '(c' + transaction_id_pattern + ')'
+    suspend_operation_pattern = '(suspend)'
     operation_pattern = '(?P<operation>(' + read_operation_pattern + '|' + write_operation_pattern + \
-                        '|' + commit_operation_pattern + '))'
+                        '|' + commit_operation_pattern + '|' + suspend_operation_pattern + '))'
     operations_pattern = '(' + operation_pattern + '[\s]+)*'
 
 
@@ -136,6 +142,17 @@ class TransactionSimulator:
         self._transaction = None
         self._local_variables = None
         self._ongoing_operation_simulators_queue = None
+        self._completed_operation_simulators_queue = None
+        self._execution_attempt_no = 0  # incremented each time adding the transaction to a scheduler.
+
+    def reset_simulator(self):
+        # The following fields will be initialized later when adding the transaction to a scheduler.
+        # It might happen multiple times, because we support "reset"ing a transaction in a case of
+        # abortion by the scheduler.
+        self._transaction = None
+        self._local_variables = None
+        self._ongoing_operation_simulators_queue = None
+        self._completed_operation_simulators_queue = None
         self._execution_attempt_no = 0  # incremented each time adding the transaction to a scheduler.
 
     # Factory function. creates a `TransactionSimulator` from a test line.
@@ -175,10 +192,13 @@ class TransactionSimulator:
         parsed_write_operation = write_operation_parser.match(operation_str)
         commit_operation_parser = regex.compile('^' + TransactionParsingPatterns.commit_operation_pattern + '$')
         parsed_commit_operation = commit_operation_parser.match(operation_str)
+        suspend_operation_parser = regex.compile('^' + TransactionParsingPatterns.suspend_operation_pattern + '$')
+        parsed_suspend_operation = suspend_operation_parser.match(operation_str)
 
         number_of_parsed_op_types = bool(parsed_read_operation) + \
                                     bool(parsed_write_operation) + \
-                                    bool(parsed_commit_operation)
+                                    bool(parsed_commit_operation) + \
+                                    bool(parsed_suspend_operation)
         assert number_of_parsed_op_types == 1
 
         if parsed_read_operation:
@@ -213,6 +233,9 @@ class TransactionSimulator:
 
             self.add_commit_operation_simulator(CommitOperation())
 
+        elif parsed_suspend_operation:
+            self.add_suspend_operation_simulator()
+
     @property
     def transaction_id(self):
         return self._transaction_id
@@ -227,20 +250,23 @@ class TransactionSimulator:
         # use `self` in the lambda functions. I didn't want to take the chance it might be wrong.
         me = self
         TransactionType = scheduler.ROTransaction if self._is_read_only else scheduler.UTransaction
-        self._transaction = TransactionType(self._transaction_id,
-                                            is_read_only=self._is_read_only,
-                                            on_operation_complete_callback=lambda *args: me.operation_completed(*args),
-                                            on_operation_failed_callback=lambda *args: me.operation_failed(*args),
-                                            on_transaction_aborted_callback=lambda *args: me.transaction_aborted(*args))
+        self._transaction = TransactionType(
+            self._transaction_id,
+            is_read_only=self._is_read_only,
+            on_operation_complete_callback=lambda *args: me.operation_completed(*args),
+            on_operation_failed_callback=lambda *args: me.operation_failed(*args),
+            on_transaction_aborted_callback=lambda *args: me.transaction_aborted(*args),
+            ask_user_for_next_operation_callback=lambda *args: me.scheduler_asked_for_next_operation(*args))
 
     def add_transaction_to_scheduler(self, scheduler):
         assert self._transaction is None
         self._execution_attempt_no += 1
         self._local_variables = dict()
         self._ongoing_operation_simulators_queue = copy.deepcopy(self._all_operation_simulators)
+        self._completed_operation_simulators_queue = []
         self.create_transaction(scheduler)
         # Add the first operation to the transaction, so the transaction won't be empty.
-        self.add_next_operation_to_transaction_if_needed()
+        # self.add_next_operation_to_transaction_if_needed()
         scheduler.add_transaction(self._transaction)
 
     def reset_transaction(self, scheduler):
@@ -269,29 +295,46 @@ class TransactionSimulator:
         operation_simulator = OperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
         self._all_operation_simulators.append(operation_simulator)
 
+    def add_suspend_operation_simulator(self):
+        operation_simulator = SuspendOperationSimulator(len(self._all_operation_simulators) + 1)
+        self._all_operation_simulators.append(operation_simulator)
+
+    # Called when the transaction waiting queue is empty the scheduler asks for the next operation to perform.
     def add_next_operation_to_transaction_if_needed(self):
         assert self._transaction is not None
         if len(self._ongoing_operation_simulators_queue) < 1:
-            return
+            return False
         next_operation_simulator = self._ongoing_operation_simulators_queue[0]
+
+        # For suspend operation simulator, we do not add any operation to the transaction.
+        if isinstance(next_operation_simulator, SuspendOperationSimulator):
+            self.operation_completed(self._transaction, None, None)
+            return False
+
+        assert next_operation_simulator.operation is not None
         if next_operation_simulator.operation.get_type() == 'write':
             value_to_write = next_operation_simulator.get_value_to_write(self._local_variables)
             next_operation_simulator.operation.to_write_value = value_to_write
         self._transaction.add_operation(next_operation_simulator.operation)
+        return True
 
     def operation_completed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
         assert len(self._ongoing_operation_simulators_queue) > 0
         operation_simulator = self._ongoing_operation_simulators_queue.pop(0)  # remove list head
+        self._completed_operation_simulators_queue.append(operation_simulator)
         assert(operation == operation_simulator.operation)
-        if operation.get_type() == 'read':
+        if isinstance(operation_simulator, ReadOperationSimulator):
+            assert operation is not None and operation.get_type() == 'read'
             assert isinstance(operation, ReadOperation)
             dest_local_var_name = operation_simulator.dest_local_variable_name
             self._local_variables[dest_local_var_name] = operation.read_value
-        self.add_next_operation_to_transaction_if_needed()
+
+        # Note: We no longer add the next operation whenever an operation is finished.
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
-        SchedulerExecutionLogger.print_variables(scheduler)
+        if scheduler is not None:
+            SchedulerExecutionLogger.print_variables(scheduler)
 
     def operation_failed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
         assert not operation.is_completed
@@ -313,13 +356,18 @@ class TransactionSimulator:
 
         self.reset_transaction(scheduler)
 
+    def scheduler_asked_for_next_operation(self, transaction: Transaction, scheduler: Scheduler):
+        assert self._transaction is not None
+        assert transaction == self._transaction
+        self.add_next_operation_to_transaction_if_needed()
+
     def to_log_str(self):
         execution_attempt_number_str = ''
-        if self._execution_attempt_no > 1:  # FIXME: should we always add the attempt number?
-            execution_attempt_number_str = '({})'.format(self._execution_attempt_no)
-        return "Transaction {transaction_id}{is_ro}{execution_attempt_number}".format(
+        if self._execution_attempt_no > 1:
+            execution_attempt_number_str = ' (Attempt: #{})'.format(self._execution_attempt_no)
+        return "Transaction {transaction_id} [{is_ro}]{execution_attempt_number}".format(
             transaction_id=self._transaction_id,
-            is_ro=('R' if self._is_read_only else 'U'),
+            is_ro=('-R-' if self._is_read_only else '*U*'),
             execution_attempt_number=execution_attempt_number_str)
 
 
@@ -392,6 +440,10 @@ class TransactionsWorkloadSimulator:
             if transaction_simulator.transaction_id == 0:
                 continue
             transaction_simulator.add_transaction_to_scheduler(scheduler)
+
+    def reset_simulator(self):
+        for transaction_simulator in self._transaction_simulators:
+            transaction_simulator.reset_simulator()
 
     def add_initialization_transaction_to_scheduler(self, scheduler: Scheduler):
         # FIXME: do we want to just detect it as first transaction?

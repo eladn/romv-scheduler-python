@@ -488,11 +488,12 @@ class ROMVScheduler(Scheduler):
         return self._mv_data_manager
 
     def on_add_transaction(self, transaction: Transaction):
-        # Assign new timestamp for RO transactions.
         if transaction.is_read_only:
             assert isinstance(transaction, ROMVTransaction)
-            transaction.timestamp = self._timestamps_manager.get_next_ts()
-            self._mv_gc.new_read_only_transaction(transaction)
+            # Behaviour changed: We now assign timestamp only when the first read operation is being tried to be performed.
+            ## Assign new timestamp for RO transactions.
+            ## transaction.timestamp = self._timestamps_manager.get_next_ts()
+            ## self._mv_gc.new_read_only_transaction(transaction)
         else:
             assert isinstance(transaction, UMVTransaction)
             # TODO: should we do here something for update transaction?
@@ -503,6 +504,17 @@ class ROMVScheduler(Scheduler):
     # TODO: doc!
     def run(self):
         for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+
+            # The user haven't yet not assigned the next operation to perform for that transaction.
+            if not transaction.has_waiting_operation_to_perform(self):
+                continue
+
+            # Assign new timestamp for RO transactions when trying to perform the first read.
+            if transaction.is_read_only and not transaction.has_timestamp:
+                assert isinstance(transaction, ROMVTransaction)
+                transaction.timestamp = self._timestamps_manager.get_next_ts()
+                self._mv_gc.new_read_only_transaction(transaction)
+
             # Try execute next operation
             transaction.try_perform_next_operation(self)
             # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
@@ -605,7 +617,8 @@ class ROMVScheduler(Scheduler):
             current_node = transaction.ro_transactions_by_arrival_list_node.next_node
         else:
             current_node = transaction.transactions_by_arrival_list_node.next_node
-        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
+        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished
+                                            or not current_node.data.has_timestamp):
             current_node = current_node.next_node
         return None if current_node is None else current_node.data
 
@@ -618,7 +631,8 @@ class ROMVScheduler(Scheduler):
             current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
         else:
             current_node = transaction.transactions_by_arrival_list_node.prev_node
-        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished):
+        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished
+                                            or not current_node.data.has_timestamp):
             current_node = current_node.prev_node
         return None if current_node is None else current_node.data
 
