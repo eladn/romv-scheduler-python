@@ -48,8 +48,10 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                           help='Verbose mode. Use in order to print the transaction state before each attempt to perform an operation.')
     add_feature_to_parser(parser, ['--log-oded-style', '-los'], default=False,
                           help='Use in order to use Oded\' style for printing the log lines.')
-    add_feature_to_parser(parser, ['--log-sched-prefix', '-lsp'], default=True,
+    add_feature_to_parser(parser, ['--log-sched-prefix'], default=True,
                           help='Use in order to print the scheduling type in the right side of each printed run-log line.')
+    add_feature_to_parser(parser, ['--log-serialization-point'], default=True,
+                          help='Use in order to print the serialization point of each transaction.')
 
     log_all_or_none = parser.add_mutually_exclusive_group(required=False)
     log_all_or_none.add_argument('--log-all', '-la', action='store_true', default=False,

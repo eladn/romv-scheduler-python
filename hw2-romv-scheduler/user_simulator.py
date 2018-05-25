@@ -378,6 +378,7 @@ class TransactionSimulator:
 
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
+
         if scheduler is not None:
             SchedulerExecutionLogger.print_variables(scheduler)
 

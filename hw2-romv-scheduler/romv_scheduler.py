@@ -416,26 +416,25 @@ class MultiVersionGC:
         intersection = left_variables_set.intersection(right_variables_set)
 
         # Print state to log.
-        Logger().log('     The right younger reader: {}'.format(
+        Logger().log('     GC: The right younger reader: {}'.format(
             'No such yet' if younger_reader is None else younger_reader.transaction_id), log_type_name='gc')
-        Logger().log('     Responsibility timespan of just-committed-reader: {}'.format(
+        Logger().log('     GC: Responsibility timespan of just-committed-reader: {}'.format(
             committed_reader_responsibility_timespan), log_type_name='gc')
-        Logger().log('     Responsibility timespan of right younger reader:  {}'.format(
+        Logger().log('     GC: Responsibility timespan of right younger reader:  {}'.format(
             right_reader_responsibility_timespan), log_type_name='gc')
-        Logger().log('     Variables under the responsibility of just-committed-reader: {}'.format(
+        Logger().log('     GC: Variables under the responsibility of just-committed-reader: {}'.format(
             str(set(left_variables_set))), log_type_name='gc')
-        Logger().log('     Variables under the responsibility of right younger reader:  {}'.format(
+        Logger().log('     GC: Variables under the responsibility of right younger reader:  {}'.format(
             str(set(right_variables_set))), log_type_name='gc')
 
         if intersection.might_be_not_empty():
-            print(' >>>>>>>>>>>>>>>>> INTERSECTION NOT EMPTY <<<<<<<<<<<<<<<<<<')
             # Register the relevant versions (from_ts, to_ts) of the variables in the intersection for eviction.
             # We don't evict it now, but we add it as a GC eviction job, to the GC eviction jobs queue.
             gc_job = MultiVersionGC.GCJob(variables_to_check=intersection,
                                           remove_versions_in_timespan=committed_reader_responsibility_timespan,
                                           promised_newer_version_in_timespan=right_reader_responsibility_timespan)
-            Logger().log('     Add GC job because of reader committed, and the intersection between the just-committed reader responsibility and the younger reader responsibility is not empty.', log_type_name='gc')
-            Logger().log('     Variables at intersaction: {}'.format(str(set(intersection))), log_type_name='gc')
+            Logger().log('     GC: Add GC job because of reader committed, and the intersection between the just-committed reader responsibility and the younger reader responsibility is not empty.', log_type_name='gc')
+            Logger().log('     GC: Variables at intersaction: {}'.format(str(set(intersection))), log_type_name='gc')
             self._gc_jobs_queue.append(gc_job)
 
         # For the old versions we could not remove now, pass the responsibility to the next younger reader.
@@ -445,10 +444,10 @@ class MultiVersionGC:
         if unhandled.might_be_not_empty():
             right_variables_set.add_variables(unhandled)
             Logger().log(
-                '     The just-committed-reader passes variables under its responsibility to its right younger reader.'.format(
+                '     GC: The just-committed-reader passes variables under its responsibility to its right younger reader.'.format(
                     unhandled),
                 log_type_name='gc')
-            Logger().log('     Passed variables: {}'.format(str(set(unhandled))), log_type_name='gc')
+            Logger().log('     GC: Passed variables: {}'.format(str(set(unhandled))), log_type_name='gc')
 
     def _update_transaction_committed(self, committed_update_transaction: UMVTransaction, scheduler):
         previous_versions = committed_update_transaction.committed_variables_latest_versions_before_update
@@ -468,12 +467,15 @@ class MultiVersionGC:
             gc_job = MultiVersionGC.GCJob(variables_to_check={variable},
                                           remove_versions_in_timespan=remove_versions_in_timespan,
                                           promised_newer_version_in_timespan=promised_newer_version_in_timespan)
-            Logger().log('     Add GC job because of updater committed variable `{variable}` with version ({new_version}) and there is no active reader since previous version ({prev_version}) of {variable}.'.format(variable=variable, new_version=committed_update_transaction.timestamp, prev_version=prev_version), log_type_name='gc')
+            Logger().log('     GC: Add GC job because of updater committed variable `{variable}` with version ({new_version}) and there is no active reader since previous version ({prev_version}) of {variable}.'.format(variable=variable, new_version=committed_update_transaction.timestamp, prev_version=prev_version), log_type_name='gc')
             self._gc_jobs_queue.append(gc_job)
 
         # Add the committed variables to the responsibility set of the youngest older read-only transaction.
         committed_variables_set = self._get_committed_variables_set_after_transaction_and_before_next(
             committed_update_transaction, scheduler)
+        Logger().log('     GC: New committed variables: {variables} are added to the responsibility set of the youngest older read-only transaction (or to the global one).'.format(
+                variables=str(set(committed_update_transaction.committed_variables))),
+            log_type_name='gc')
         for variable in committed_update_transaction.committed_variables:
             committed_variables_set.add_variable(variable)
 
@@ -586,6 +588,7 @@ class ROMVScheduler(Scheduler):
     # TODO: doc!
     def run(self):
         for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+            serialization_point_flag = False
 
             # The user haven't yet not assigned the next operation to perform for that transaction.
             if not transaction.has_waiting_operation_to_perform(self):
@@ -595,6 +598,7 @@ class ROMVScheduler(Scheduler):
             if transaction.is_read_only and not transaction.has_timestamp:
                 assert isinstance(transaction, ROMVTransaction)
                 self.assign_timestamp_to_transaction(transaction)
+                serialization_point_flag = True
                 self._mv_gc.new_read_only_transaction(transaction)
 
             # Try execute next operation
@@ -613,10 +617,15 @@ class ROMVScheduler(Scheduler):
                 if not transaction.is_read_only:
                     assert isinstance(transaction, UMVTransaction)
                     self.assign_timestamp_to_transaction(transaction)
+                    serialization_point_flag = True
                     transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
                 self._mv_gc.run_waiting_gc_jobs(self)
+
+            if serialization_point_flag:
+                Logger().log('     Serialization point. Timestamp: {ts}'.format(ts=transaction.timestamp),
+                             log_type_name='serialization_point')
 
     def assign_timestamp_to_transaction(self, transaction: Transaction):
         transaction.timestamp = self._timestamps_manager.get_next_ts()
