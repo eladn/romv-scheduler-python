@@ -33,6 +33,6 @@ R 6 d0=r(x) d0=r(x) d0=r(x) d1=r(z) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d0=r(x) d2=r
 ### from here until the last one is done :
 ## versions after rounds : {("x",[("3",1),("19",4)]),("y",[("7",1),("9",6)]),("z",[("10",1),("9",6)])}
 #
-#after the last one is done :
-versions after round : {("x",[("19",4)]),("y",[("9",6)]),("z",[("9",6)])}
+# after the last one is done :
+# versions after round : {("x",[("19",4)]),("y",[("9",6)]),("z",[("9",6)])}
 

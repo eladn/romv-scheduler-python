@@ -14,13 +14,13 @@ R 8 b1=r(x) b2=r(z) c8;
 # in the end of U0 : {("x",[("3",1)]),("y",[("7",1)]),("z",[("10",1)])}
 # in the end of R1 : {("x",[("3",1)]),("y",[("7",1)]),("z",[("10",1)])}
 ## the version of x was updated by U2 and no one needs the older version because all are finished before U2
-# in the end of U2 : {("x",[("10",3)]),("y",[("7",1)]),("z",[("10",1)])}
-# in the end of R3 : {("x",[("10",3)]),("y",[("7",1)]),("z",[("10",1)])}
+# in the end of U2 : {("x",[("10",6)]),("y",[("7",1)]),("z",[("10",1)])}
+# in the end of R3 : {("x",[("10",6)]),("y",[("7",1)]),("z",[("10",1)])}
 ## the version of x was updated by U4 and no one needs the older version because all are finished before U4
-# in the end of U4 : {("x",[("11",5)]),("y",[("7",1)]),("z",[("10",1)])}
-# in the end of R5 : {("x",[("11",5)]),("y",[("7",1)]),("z",[("10",1)])}
+# in the end of U4 : {("x",[("11",7)]),("y",[("7",1)]),("z",[("10",1)])}
+# in the end of R5 : {("x",[("11",7)]),("y",[("7",1)]),("z",[("10",1)])}
 ## the version of x,z was updated by U6 and no one needs the older version because all are finished before U6
-# in the end of U6 : {("x",[("13",7)]),("y",[("7",1)]),("z",[("14",7)])}
-# in the end of U7 : {("x",[("15",8)]),("y",[("15",8)]),("z",[("14",7)])}
-# in the end of R8 : {("x",[("15",8)]),("y",[("15",8)]),("z",[("14",7)])}
+# in the end of U6 : {("x",[("13",8)]),("y",[("7",1)]),("z",[("14",8)])}
+# in the end of U7 : {("x",[("15",9)]),("y",[("15",9)]),("z",[("14",8)])}
+# in the end of R8 : {("x",[("15",9)]),("y",[("15",9)]),("z",[("14",8)])}
 
