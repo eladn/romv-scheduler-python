@@ -341,7 +341,7 @@ class TransactionsWorkloadSimulator:
         with open(workload_data_filename, 'r') as test_file:
 
             # Read comment lines before the test first line.
-            test_first_line = TransactionsWorkloadSimulator._read_first_line_that_is_not_comment(test_file)
+            test_first_line = TransactionsWorkloadSimulator._read_first_nonempty_line_that_is_not_comment(test_file)
 
             # Parse test first line (scheduling scheme, number of transactions).
             test_first_line = test_first_line.strip()
@@ -374,8 +374,10 @@ class TransactionsWorkloadSimulator:
         return parsed_comment_line is not None
 
     @staticmethod
-    def _read_first_line_that_is_not_comment(test_file):
+    def _read_first_nonempty_line_that_is_not_comment(test_file):
         for line in test_file:
+            if not line.strip():
+                continue
             if not TransactionsWorkloadSimulator._is_comment_line(line):
                 return line
         return None
