@@ -126,50 +126,70 @@ class LocksManager:
         return self._deadlock_detector.is_deadlock()
 
 
-# the class that manages the versions of values of the vars in the system
+# The class is responsible for managing the versions of values of the variables in the system.
 class MultiVersionDataManager:
+    Version = namedtuple('Version', ['value', 'ts'])
+
+    class Disk:
+        def __init__(self):
+            # a dictionary - for each variable we map a Version (consisted by value and ts).
+            self.mapping_from_variable_to_versions_list = defaultdict(list)
+
+        def access_versions_list_for_variable(self, variable_name):
+            return self.mapping_from_variable_to_versions_list[variable_name]
+
+        def is_variable_stored_on_disk(self, variable_name):
+            return variable_name in self.mapping_from_variable_to_versions_list
+
     def __init__(self):
-        # a dict - key : var , value : version value and ts.
-        self._versions_dict_by_variables = dict()
-        # dict - key : var , value : most updated value (that was committed)
-        self._disk_last_all_version_values = dict()
+        self._disk = MultiVersionDataManager.Disk()
 
-        # TODO: make sure to explicitly separate the disk member from the "RAM" data-structures!
-        # todo - need to check if that what was wanted
+        # Local RAM cache saves the latest version ts for each variable.
+        # Maps variable name to the latest committed ts for this value.
+        self._cache_mapping_from_variable_to_its_lastest_ts = dict()
 
-    # returns the latest value before the curr timestamp
+    # Returns the latest value before the given `max_ts` timestamp.
     # Returns `None` if there wasn't any write to this variable yet.
     def read_older_version_than(self, variable, max_ts: Timestamp):
-        if variable in self._versions_dict_by_variables.keys():
-            for (value, ts) in reversed(self._versions_dict_by_variables[variable]):
-                if ts < max_ts:
-                    return value
+        if variable not in self._disk.mapping_from_variable_to_versions_list:
+            return None
+        for version in reversed(self._disk.access_versions_list_for_variable(variable)):
+            if version.ts < max_ts:
+                return version.value
         return None
 
-    # adds the new version to the latest one and also to the list of versions for each var
-    def write_new_version(self, variable, new_value, ts: Timestamp):
-        if variable not in self._versions_dict_by_variables.keys():
-            self._versions_dict_by_variables[variable] = [(new_value, ts)]
-        else:
-            self._versions_dict_by_variables[variable].append((new_value, ts))
-        # update the disk
-        self._disk_last_all_version_values[variable] = new_value
+    # Adds the new version to the disk and update local cache.
+    def write_new_version(self, variable, new_value, new_ts: Timestamp):
+        new_version = MultiVersionDataManager.Version(value=new_value, ts=new_ts)
+        assert len(self._disk.access_versions_list_for_variable(variable)) == 0\
+               or self._disk.access_versions_list_for_variable(variable)[-1].ts < new_ts
+        self._disk.access_versions_list_for_variable(variable).append(new_version)
+        # update the latest ts in the local cache at RAM.
+        self._cache_mapping_from_variable_to_its_lastest_ts[variable] = new_ts
 
-    # gets the ts of the latest version
+    # Returns the ts of the latest version.
     # Returns `None` if there wasn't any write to this variable yet.
     def get_latest_version_number(self, variable):
-        ts = 1
-        if variable in self._versions_dict_by_variables.keys():
-            return self._versions_dict_by_variables[variable][-1][ts]
-        return None
+        # Firstly lets take a look in the local cache (at RAM).
+        if variable in self._cache_mapping_from_variable_to_its_lastest_ts:
+            return self._cache_mapping_from_variable_to_its_lastest_ts[variable]
 
-    # gets the value of the latest version of the var
+        # Variable not found in RAM. Lets access the disk to search for it.
+        if not self._disk.is_variable_stored_on_disk(variable):
+            return None
+        latest_ts_from_disk = self._disk.access_versions_list_for_variable(variable)[-1].ts
+
+        # Lets update the cache now.
+        self._cache_mapping_from_variable_to_its_lastest_ts[variable] = latest_ts_from_disk
+        return latest_ts_from_disk
+
+    # Returns the value of the latest version of the given variable.
     # Returns `None` if there wasn't any write to this variable yet.
     def read_latest_version(self, variable):
-        value = 0
-        if variable in self._versions_dict_by_variables.keys():
-            return self._versions_dict_by_variables[variable][-1][value]
-        return None
+        # Lets access the disk to search for it.
+        if not self._disk.is_variable_stored_on_disk(variable):
+            return None
+        return self._disk.access_versions_list_for_variable(variable)[-1].value
 
     # This method is used by the GC eventual eviction mechanism.
     # Removes versions of the given variable that are inside of the given timespan
@@ -184,21 +204,33 @@ class MultiVersionDataManager:
     def delete_old_versions_in_interval(self, variable,
                                         remove_versions_in_timespan: Timespan,
                                         promised_newer_version_in_timespan: Timespan):
-        flag_promised = False
-        flag_remove_found = False
-        if variable in self._versions_dict_by_variables.keys():
-            for (value, ts) in reversed(self._versions_dict_by_variables[variable]):
-                if promised_newer_version_in_timespan.from_ts > ts > promised_newer_version_in_timespan.to_ts:
-                    flag_promised = True
-                if remove_versions_in_timespan.from_ts > ts > remove_versions_in_timespan.to_ts:
-                    flag_remove_found = True
-                    if flag_promised:
-                        self._versions_dict_by_variables[variable].remove((value, ts))
-        return flag_remove_found, flag_promised
+        assert remove_versions_in_timespan.to_ts <= promised_newer_version_in_timespan.from_ts
+
+        if not self._disk.is_variable_stored_on_disk(variable):
+            return False, False
+
+        flag_remove_found, flag_promised_found = False, False
+        versions_to_remove = []  # marked versions to be remove
+        for version in reversed(self._disk.access_versions_list_for_variable(variable)):
+            if remove_versions_in_timespan.from_ts > version.ts > remove_versions_in_timespan.to_ts:
+                flag_remove_found = True
+                if flag_promised_found:
+                    # Mark this version to remove. We cannot remove while iterating a python list.
+                    # In real-life case we would like to remove it during the iteration.
+                    versions_to_remove.append(version)
+            if promised_newer_version_in_timespan.from_ts > version.ts > promised_newer_version_in_timespan.to_ts:
+                flag_promised_found = True
+
+        # Actually remove the versioned marked to remove.
+        # In real-life case we would like to remove it during the finding iteration.
+        for version_to_remove in versions_to_remove:
+            self._disk.access_versions_list_for_variable(variable).remove(version_to_remove)
+
+        return flag_remove_found, flag_promised_found
 
     # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
-        return self._versions_dict_by_variables.items()
+        return self._disk.mapping_from_variable_to_versions_list.items()
 
 
 class ROMVTransaction(Scheduler.ROTransaction):
