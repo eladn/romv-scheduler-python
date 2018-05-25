@@ -1,5 +1,6 @@
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
+from itertools import chain
 from scheduler_base_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
 from logger import Logger
 
@@ -12,10 +13,13 @@ class SchedulerExecutionLogger:
 
     @staticmethod
     def transaction_action(transaction_simulator, operation_simulator):
-        Logger().log("{trans} action {action_no}{waiting}".format(
+        full_state = (' ' + transaction_simulator.to_full_state_str()
+                      if Logger().is_log_type_set_on('transaction_state') else '')
+        Logger().log("{trans} action {action_no}{waiting}{full_state}".format(
             trans=transaction_simulator.to_log_str(),
-            action_no=operation_simulator.operation_number,
-            waiting=('' if operation_simulator.operation is None or operation_simulator.operation.is_completed else ' WAITING')))
+            action_no=str(operation_simulator.operation_number).ljust(2),
+            waiting=(' ' * len(' WAITING') if operation_simulator.operation is None or operation_simulator.operation.is_completed else ' WAITING'),
+            full_state=full_state))
 
     @staticmethod
     def print_variables(scheduler: Scheduler):
@@ -42,6 +46,9 @@ class OperationSimulator:
     def operation_number(self):
         return self._operation_number
 
+    def __str__(self):
+        return 'unknown-operation'
+
 
 class ReadOperationSimulator(OperationSimulator):
     def __init__(self, operation: Operation, operation_number: int, dest_local_variable_name: str):
@@ -51,6 +58,13 @@ class ReadOperationSimulator(OperationSimulator):
     @property
     def dest_local_variable_name(self):
         return self._dest_local_variable_name
+
+    def __str__(self):
+        assert isinstance(self.operation, ReadOperation)
+        ret_str = self._dest_local_variable_name + '=r(' + self.operation.variable + ')'
+        if self.operation.is_completed:
+            ret_str += '=' + self.operation.read_value
+        return ret_str
 
 
 class WriteOperationSimulator(OperationSimulator):
@@ -71,10 +85,30 @@ class WriteOperationSimulator(OperationSimulator):
         assert self._src_local_variable_name is not None
         return local_variables[self._src_local_variable_name]
 
+    def __str__(self):
+        assert isinstance(self.operation, WriteOperation)
+        src_value_to_write = self._src_local_variable_name if self._const_val is None else self._const_val
+        actual_value_written = ''
+        if self._const_val is None and self.operation.is_completed:
+            actual_value_written = '=' + self.operation.to_write_value
+        ret_str = 'w(' + self.operation.variable + ', ' + src_value_to_write + actual_value_written + ')'
+        return ret_str
+
+
+class CommitOperationSimulator(OperationSimulator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __str__(self):
+        return 'commit'
+
 
 class SuspendOperationSimulator(OperationSimulator):
     def __init__(self, operation_number: int):
         super().__init__(None, operation_number)
+
+    def __str__(self):
+        return 'suspend'
 
 
 # Collection of patterns used for parsing the input workload test file.
@@ -292,7 +326,7 @@ class TransactionSimulator:
 
     def add_commit_operation_simulator(self, commit_operation: CommitOperation):
         assert self._execution_attempt_no == 0 and self._transaction is None
-        operation_simulator = OperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
+        operation_simulator = CommitOperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
         self._all_operation_simulators.append(operation_simulator)
 
     def add_suspend_operation_simulator(self):
@@ -320,21 +354,26 @@ class TransactionSimulator:
 
     def operation_completed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
         assert len(self._ongoing_operation_simulators_queue) > 0
-        operation_simulator = self._ongoing_operation_simulators_queue.pop(0)  # remove list head
-        self._completed_operation_simulators_queue.append(operation_simulator)
+
+        operation_simulator = self._ongoing_operation_simulators_queue[0]  # this should be the next awaiting operation
         assert(operation == operation_simulator.operation)
+
         if isinstance(operation_simulator, ReadOperationSimulator):
             assert operation is not None and operation.get_type() == 'read'
             assert isinstance(operation, ReadOperation)
             dest_local_var_name = operation_simulator.dest_local_variable_name
             self._local_variables[dest_local_var_name] = operation.read_value
 
-        # Note: We no longer add the next operation whenever an operation is finished.
-
         # print to execution log!
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
         if scheduler is not None:
             SchedulerExecutionLogger.print_variables(scheduler)
+
+        popped_operation_simulator = self._ongoing_operation_simulators_queue.pop(0)  # remove list head
+        assert popped_operation_simulator == operation_simulator
+        self._completed_operation_simulators_queue.append(operation_simulator)
+
+        # Note: We no longer add the next operation whenever an operation is finished.
 
     def operation_failed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
         assert not operation.is_completed
@@ -361,15 +400,27 @@ class TransactionSimulator:
         assert transaction == self._transaction
         self.add_next_operation_to_transaction_if_needed()
 
+    def to_full_state_str(self):
+        completed_operations = (('   ' + str(transaction_simulator).ljust(11)
+                                 for transaction_simulator
+                                 in self._completed_operation_simulators_queue))
+        #current_awaiting_operation = ()
+        #if len(self._ongoing_operation_simulators_queue) > 0:
+        #    current_awaiting_operation = ('->' + str(self._ongoing_operation_simulators_queue[0]), )
+        next_awaiting_operations = (str(transaction_simulator).ljust(11)
+                                    for transaction_simulator
+                                    in self._ongoing_operation_simulators_queue)
+        return ''.join(completed_operations) + ' > ' + '   '.join(next_awaiting_operations)
+
     def to_log_str(self):
         if Logger().is_log_type_set_on('oded_style'):
             return self._to_log_str_oded_style()
         return self._to_log_str_alternative_style()
 
     def _to_log_str_alternative_style(self):
-        execution_attempt_number_str = ''
+        execution_attempt_number_str = '     '
         if self._execution_attempt_no > 1:
-            execution_attempt_number_str = ' (Attempt: #{})'.format(self._execution_attempt_no)
+            execution_attempt_number_str = ' (#{})'.format(self._execution_attempt_no)
         return "Transaction {transaction_id} [{is_ro}]{execution_attempt_number}".format(
             transaction_id=self._transaction_id,
             is_ro=('-R-' if self._is_read_only else '*U*'),
