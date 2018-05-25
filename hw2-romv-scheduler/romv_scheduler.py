@@ -230,7 +230,8 @@ class MultiVersionDataManager:
 
     # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
-        return self._disk.mapping_from_variable_to_versions_list.items()
+        for variable, versions_list in self._disk.mapping_from_variable_to_versions_list.items():
+            yield variable, [tuple(version) for version in versions_list]
 
 
 class ROMVTransaction(Scheduler.ROTransaction):

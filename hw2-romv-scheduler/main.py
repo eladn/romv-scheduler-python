@@ -95,6 +95,7 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
 
     # Print the data:
     Logger().log("Data in the end of the run:")
+    # variables = sorted(list(scheduler.get_variables()), key=lambda x: x[0])
     Logger().log(str(dict(scheduler.get_variables())))
 
     if scheduler.scheduling_scheme == 'RR':
