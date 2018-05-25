@@ -362,12 +362,26 @@ class TransactionSimulator:
         self.add_next_operation_to_transaction_if_needed()
 
     def to_log_str(self):
+        if Logger().is_log_type_set_on('oded_style'):
+            return self._to_log_str_oded_style()
+        return self._to_log_str_alternative_style()
+
+    def _to_log_str_alternative_style(self):
         execution_attempt_number_str = ''
         if self._execution_attempt_no > 1:
             execution_attempt_number_str = ' (Attempt: #{})'.format(self._execution_attempt_no)
         return "Transaction {transaction_id} [{is_ro}]{execution_attempt_number}".format(
             transaction_id=self._transaction_id,
             is_ro=('-R-' if self._is_read_only else '*U*'),
+            execution_attempt_number=execution_attempt_number_str)
+
+    def _to_log_str_oded_style(self):
+        execution_attempt_number_str = ''
+        if self._execution_attempt_no > 1:
+            execution_attempt_number_str = '({})'.format(self._execution_attempt_no)
+        return "Transaction {transaction_id}{is_ro}{execution_attempt_number}".format(
+            transaction_id=self._transaction_id,
+            is_ro=('R' if self._is_read_only else 'U'),
             execution_attempt_number=execution_attempt_number_str)
 
 

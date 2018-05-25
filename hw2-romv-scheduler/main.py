@@ -77,7 +77,8 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     scheduler.run()
 
     # Print a blank line after the initialization.
-    Logger().log()
+    if not Logger().is_log_type_set_on('oded_style'):
+        Logger().log()
 
     # Run the transactions T1-Tn using the chosen scheduling scheme.
     # After an operation is completed for a certain transaction, the simulator would immediately spawn
@@ -177,6 +178,10 @@ def run_scheduling_test(args, test_file_path):
 if __name__ == '__main__':
     # Parse all input (optional) arguments for the scripts.
     args = args_parser()
+
+    for arg_name, arg_value in vars(args).items():
+        if arg_name.startswith('log_'):
+            Logger().toggle_log_type(arg_name[4:], arg_value)
 
     test_files = args.tests
     if not test_files:
