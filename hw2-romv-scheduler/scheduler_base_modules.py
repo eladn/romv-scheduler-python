@@ -511,5 +511,8 @@ class NoFalseNegativeVariablesSet:
         new_variables_set._variables_set = self._variables_set.difference(another_variables_set._variables_set)
         return new_variables_set
 
+    def might_be_not_empty(self):
+        return len(self._variables_set) > 0
+
     def __iter__(self):
         return iter(self._variables_set)

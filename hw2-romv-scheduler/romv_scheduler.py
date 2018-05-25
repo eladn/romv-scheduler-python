@@ -212,13 +212,13 @@ class MultiVersionDataManager:
         flag_remove_found, flag_promised_found = False, False
         versions_to_remove = []  # marked versions to be remove
         for version in reversed(self._disk.access_versions_list_for_variable(variable)):
-            if remove_versions_in_timespan.from_ts > version.ts > remove_versions_in_timespan.to_ts:
+            if remove_versions_in_timespan.from_ts >= version.ts >= remove_versions_in_timespan.to_ts:
                 flag_remove_found = True
                 if flag_promised_found:
                     # Mark this version to remove. We cannot remove while iterating a python list.
                     # In real-life case we would like to remove it during the iteration.
                     versions_to_remove.append(version)
-            if promised_newer_version_in_timespan.from_ts > version.ts > promised_newer_version_in_timespan.to_ts:
+            if promised_newer_version_in_timespan.from_ts >= version.ts >= promised_newer_version_in_timespan.to_ts:
                 flag_promised_found = True
 
         # Actually remove the versioned marked to remove.
@@ -390,8 +390,8 @@ class MultiVersionGC:
         #  Reader   |  current committed reader       |  Reader    | oldest younger reader if exists | Reader  |
         #  Birth    |     { left variables set }      |  Birth     |     { right variables set }     | Birth   |
         left_variables_set = committed_read_transaction.committed_variables_set_since_last_reader_born
-        right_variables_set, right_reader_responsibility_timespan = self._get_committed_variables_set_after_reader_and_before_next(
-            committed_read_transaction, scheduler)
+        younger_reader, right_variables_set, right_reader_responsibility_timespan = \
+            self._get_committed_variables_set_after_reader_and_before_next(committed_read_transaction, scheduler)
 
         # The just-committed-read-transaction has indeed ended. Hence the returned timespan of the younger alive
         # reader ALREADY includes the timespan of this just-committed-reader. We want to have the timespan of the
@@ -410,18 +410,40 @@ class MultiVersionGC:
         # time-span of the next younger reader. It means that now no reader needs them.
         intersection = left_variables_set.intersection(right_variables_set)
 
-        # Register the relevant versions (from_ts, to_ts) of the variables in the intersection for eviction.
-        # We don't evict it now, but we add it as a GC eviction job, to the GC eviction jobs queue.
-        gc_job = MultiVersionGC.GCJob(variables_to_check=intersection,
-                                      remove_versions_in_timespan=committed_reader_responsibility_timespan,
-                                      promised_newer_version_in_timespan=right_reader_responsibility_timespan)
-        self._gc_jobs_queue.append(gc_job)
+        # Print state to log.
+        Logger().log('     The right younger reader: {}'.format(
+            'No such yet' if younger_reader is None else younger_reader.transaction_id), log_type_name='gc')
+        Logger().log('     Responsibility timespan of just-committed-reader: {}'.format(
+            committed_reader_responsibility_timespan), log_type_name='gc')
+        Logger().log('     Responsibility timespan of right younger reader:  {}'.format(
+            right_reader_responsibility_timespan), log_type_name='gc')
+        Logger().log('     Variables under the responsibility of just-committed-reader: {}'.format(
+            str(set(left_variables_set))), log_type_name='gc')
+        Logger().log('     Variables under the responsibility of right younger reader:  {}'.format(
+            str(set(right_variables_set))), log_type_name='gc')
+
+        if intersection.might_be_not_empty():
+            print(' >>>>>>>>>>>>>>>>> INTERSECTION NOT EMPTY <<<<<<<<<<<<<<<<<<')
+            # Register the relevant versions (from_ts, to_ts) of the variables in the intersection for eviction.
+            # We don't evict it now, but we add it as a GC eviction job, to the GC eviction jobs queue.
+            gc_job = MultiVersionGC.GCJob(variables_to_check=intersection,
+                                          remove_versions_in_timespan=committed_reader_responsibility_timespan,
+                                          promised_newer_version_in_timespan=right_reader_responsibility_timespan)
+            Logger().log('     Add GC job because of reader committed, and the intersection between the just-committed reader responsibility and the younger reader responsibility is not empty.', log_type_name='gc')
+            Logger().log('     Variables at intersaction: {}'.format(str(set(intersection))), log_type_name='gc')
+            self._gc_jobs_queue.append(gc_job)
 
         # For the old versions we could not remove now, pass the responsibility to the next younger reader.
         # These versions would be eventually in the responsibility time-span of a reader that will evict
         # them when it commits.
         unhandled = left_variables_set.difference(intersection)
-        right_variables_set.add_variables(unhandled)
+        if unhandled.might_be_not_empty():
+            right_variables_set.add_variables(unhandled)
+            Logger().log(
+                '     The just-committed-reader passes variables under its responsibility to its right younger reader.'.format(
+                    unhandled),
+                log_type_name='gc')
+            Logger().log('     Passed variables: {}'.format(str(set(unhandled))), log_type_name='gc')
 
     def _update_transaction_committed(self, committed_update_transaction: UMVTransaction, scheduler):
         previous_versions = committed_update_transaction.committed_variables_latest_versions_before_update
@@ -441,6 +463,7 @@ class MultiVersionGC:
             gc_job = MultiVersionGC.GCJob(variables_to_check={variable},
                                           remove_versions_in_timespan=remove_versions_in_timespan,
                                           promised_newer_version_in_timespan=promised_newer_version_in_timespan)
+            Logger().log('     Add GC job because of updater committed variable `{variable}` with version ({new_version}) and there is no active reader since previous version ({prev_version}) of {variable}.'.format(variable=variable, new_version=committed_update_transaction.timestamp, prev_version=prev_version), log_type_name='gc')
             self._gc_jobs_queue.append(gc_job)
 
     # Called by the scheduler each time a transaction is committed.
@@ -491,12 +514,12 @@ class MultiVersionGC:
         if younger_transaction is None:
             responsibility_timespan = Timespan(from_ts=after_reader.timestamp,
                                                to_ts=scheduler.get_current_ts())
-            return self._committed_variables_set_since_younger_reader_born, responsibility_timespan
+            return younger_transaction, self._committed_variables_set_since_younger_reader_born, responsibility_timespan
         assert isinstance(younger_transaction, ROMVTransaction)
         responsibility_timespan = self._get_responsibility_timespan_of_read_transaction(younger_transaction, scheduler)
         assert (after_reader.is_finished and responsibility_timespan.from_ts < after_reader.timestamp) or \
                (not after_reader.is_finished and responsibility_timespan.from_ts == after_reader.timestamp)
-        return younger_transaction.committed_variables_set_since_last_reader_born, responsibility_timespan
+        return younger_transaction, younger_transaction.committed_variables_set_since_last_reader_born, responsibility_timespan
 
 
 # TODO: fully doc it!
