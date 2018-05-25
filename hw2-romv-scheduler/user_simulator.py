@@ -26,7 +26,7 @@ class SchedulerExecutionLogger:
     @staticmethod
     def print_variables(scheduler: Scheduler):
         Logger().log('Variables: {}'.format(list(scheduler.get_variables())),
-                     log_type_name='scheduler_simulator_verbose')
+                     log_type_name='variables')
 
 
 # Operation simulator is responsible for storing an operation to perform.
@@ -438,12 +438,10 @@ class TransactionSimulator:
 
 # Parse the input test file and add transactions and their operations to the given scheduler.
 class TransactionsWorkloadSimulator:
-    def __init__(self, verbose=False):
+    def __init__(self):
         self._transaction_simulators = []
         self._transaction_id_to_transaction_simulator = dict()  # FIXME: maybe we don't need it
         self._schedule = 'RR'
-        if not verbose:
-            Logger().turn_off('scheduler_simulator_verbose')
 
     @property
     def schedule(self):

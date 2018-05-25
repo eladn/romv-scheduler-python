@@ -34,7 +34,7 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                         type=str, nargs='+', required=False,
                         help='Test file-names to use.')
 
-    add_feature_to_parser(parser, ['--log-variables', '-lv'], default=True,
+    add_feature_to_parser(parser, ['--log-variables', '-lv'], default=False,
                           help='Verbose mode. Use in order to print the variables values after each change.')
     add_feature_to_parser(parser, ['--log-locks', '-ll'], default=True,
                           help='Verbose mode. Use in order to print the locks table whenever a lock is aquired or released.')
@@ -191,7 +191,6 @@ if __name__ == '__main__':
         if not arg_name.startswith('log_'):
             continue
         if arg_name != 'log_all' and arg_name != 'log_none' and arg_name != 'log_oded_style':
-            print(arg_name)
             if args.log_all:
                 arg_value = True
             elif args.log_none:
