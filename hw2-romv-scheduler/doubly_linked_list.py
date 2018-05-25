@@ -54,14 +54,15 @@ class DoublyLinkedList:
         assert(after_node is None or isinstance(after_node, self.Node))
         if after_node is None:
             return self.push_front(data)
-        assert(after_node.in_list == self)
+
+        assert(after_node.in_list is self)
         new_node = self.Node(self, data, after_node, after_node.next_node)
-        after_node.next_node = new_node
         if after_node.next_node is not None:
             after_node.next_node.prev_node = new_node
         else:
             assert(self.last == after_node)
             self.last = new_node
+        after_node.next_node = new_node
         self.count += 1
         return new_node
 
@@ -83,13 +84,16 @@ class DoublyLinkedList:
         assert(node.in_list == self)
         self.count -= 1
         self._detach_node(node)
+        node.in_list = None
 
     def _detach_node(self, node):
         if node.prev_node is not None:
+            assert node.prev_node.in_list is self
             node.prev_node.next_node = node.next_node
         else:
             self.first = node.next_node
         if node.next_node is not None:
+            assert node.next_node.in_list is self
             node.next_node.prev_node = node.prev_node
         else:
             self.last = node.prev_node
@@ -114,3 +118,17 @@ class DoublyLinkedList:
 
     def __len__(self):
         return self.count
+
+    def assert_valid(self):
+        assert (self.first is None and self.last is None) or (self.first is not None and self.last is not None)
+        cur = self.first
+        prev = None
+        size = 0
+        while cur:
+            assert (cur.in_list is self)
+            size += 1
+            assert prev == cur.prev_node
+            prev = cur
+            cur = cur.next_node
+        assert prev == self.last
+        assert self.count == size
