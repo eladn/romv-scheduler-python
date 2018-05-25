@@ -23,11 +23,11 @@ U 6 s0=r(x) w(x, 8) c6;
 # R1:4      U3:4 R4:4 R5:4
 # the last reader who needed the prev values died so we can keep the most updated value
 # versions after round : {("x",[("8",4)]),("y",[("3",7),("3",'uncommitted')]),("z",[("3",1)]),("v",[("5",1)]),("u",[("5",3)])}
-# local var values {d0=3,d1=2,f3=3}
+# local var values {d0=3,d1=2,f3=2}
 
 #           U3:5 R4:5 R5:5
 # versions after round : {("x",[("8",4)]),("y",[("3",7),("3",6)]),("z",[("3",1)]),("v",[("5",1)]),("u",[("5",3)])}
-# local var values {e0=3,f3=3,f4=8}
+# local var values {e0=3,f3=2,f4=8}
 
 #                R4:6 R5:6
 # versions after round : {("x",[("8",4)]),("y",[("3",6)]),("z",[("3",1)]),("v",[("5",1)]),("u",[("5",3)])}
