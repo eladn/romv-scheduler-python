@@ -3,7 +3,9 @@ import argparse
 from user_simulator import TransactionsWorkloadSimulator
 from romv_scheduler import ROMVScheduler
 from serial_scheduler import SerialScheduler
+from scheduler_base_modules import Scheduler
 from logger import Logger
+from utils import add_feature_to_parser
 
 TESTS_DIR = 'tests'
 DEFAULT_TEST_FILENAME = 'transactions.dat'
@@ -13,41 +15,51 @@ DEFAULT_TEST_FILENAME = 'transactions.dat'
 def args_parser():
     parser = argparse.ArgumentParser(
         description='DB implementation [236510] / Simulator for ROMV transactions scheduler.')
-    parser.add_argument('--force_serial', '-s',
-                        type=bool, nargs='?',
-                        help='Force using a simple serial scheduler. Used mostly for debugging. ' +
-                        'If not specified, use the scheduling scheme mentioned in the test file.')
-    parser.add_argument('--tests', '-t',
-                        type=str, nargs='*',
+    parser.add_argument('--sched', '-s',
+                        type=str.lower,
+                        choices=['by-test', 'romv-rr', 'romv-serial', 'simple-serial', 'compare-all'],
+                        default='by-test',
+                        help="""
+Force using a certain scheduler, regardless of the chosen scheduling scheme mentioned in the test file.
+For the ROMV scheduler use either `romv-rr` or `romv-serial` according to the wanted scheduling scheme (serial/RR). 
+For the simple serial scheduler use `simple-serial`.
+For both `romv-serial` and `simple-serial` you can use the `serial-order` argument to specify the wanted order of
+transactions.
+Use `compare-all` option to run each test firstly using the ROMV-scheduler with RR scheduling-scheme, and than compare
+its run results with both the ROMV-scheduler with serial scheduling-scheme and with the simple serial scheduler, both
+using the same transactions order as determined the the first run (using the ROMV-scheduler with RR scheduling-scheme).
+If not specified, the ROMV scheduler is used with the scheduling scheme (RR/serial) mentioned in the test file.
+""")
+    parser.add_argument('--tests', '--test', '-t',
+                        type=str, nargs='+', required=False,
                         help='Test file-names to use.')
-    parser.add_argument('--verbose', '-v',
-                        type=bool, nargs='?', default=True,
-                        help='Verbose mode. Use in order to print the variables values after each operation.')
+
+    add_feature_to_parser(parser, ['--log-variables', '-lv'], default=True,
+                          help='Verbose mode. Use in order to print the variables values after each change.')
+    add_feature_to_parser(parser, ['--log-locks', '-ll'], default=True,
+                          help='Verbose mode. Use in order to print the locks table whenever a lock is aquired or released.')
+    add_feature_to_parser(parser, ['--log-wait-to', '-lw'], default=True,
+                          help='Verbose mode. Use in order to print enumeration of the the transactions that an operation waits to.')
+    add_feature_to_parser(parser, ['--log-gc', '-lgc'], default=True,
+                          help='Verbose mode. Use in order to print when the GC marks a version to be evicted and when actual eviction happens.')
+    add_feature_to_parser(parser, ['--log-transaction-state', '-lts'], default=True,
+                          help='Verbose mode. Use in order to print the transaction state before each attempt to perform an operation.')
+    add_feature_to_parser(parser, ['--log-oded-style', '-los'], default=False,
+                          help='Use in order to use Oded\' style for printing the log lines.')
+    add_feature_to_parser(parser, ['--log-sched-prefix', '-lsp'], default=True,
+                          help='Use in order to print the scheduling type in the right side of each printed run-log line.')
+
     return parser.parse_args()
 
 
-def run_scheduling_test(args, test_file_path):
-    Logger().log('-----------------------------------------------------------')
-    Logger().log('<<<<<<<< TEST: `{}` >>>>>>>>'.format(test_file_path))
-    Logger().log('-----------------------------------------------------------')
+def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: Scheduler):
+    scheduler_type_str = 'ROMV ' + scheduler.scheduling_scheme if isinstance(scheduler,
+                                                                             ROMVScheduler) else 'simple-serial'
 
-    # The simulator is responsible for reading the workload test file and injecting the
-    # transactions into the scheduler. For each transaction, the simulator simulates an
-    # execution of the user program that manages this transaction. It means that values
-    # that are retrieved using read-operations might be stored temporarily in local
-    # variables of the program, and might be used later for as a value to write in a
-    # write-operation. The simulator is also responsible for restarting a transaction
-    # that ahs been aborted by the scheduler (due to a deadlock).
-    simulator = TransactionsWorkloadSimulator(args.verbose)
-
-    # Parse the workload test file and add its contents to the simulator.
-    simulator.load_test_data(test_file_path)
-
-    # Initialize the relevant scheduler.
-    # By default use the scheduling scheme mentioned in the test file.
-    # If a certain scheduling scheme mentioned explicitly in the arguments, use it.
-    schedule_scheme = simulator.schedule
-    scheduler = ROMVScheduler(schedule_scheme) if not args.force_serial else SerialScheduler()
+    # Tell the logger to print the type of the current scheduler type as a prefix of each line of the run-log.
+    if args.log_sched_prefix:
+        prefix = scheduler_type_str
+        Logger().prefix = prefix + ' ' * (16 - len(prefix)) + '|  '
 
     # Firstly, completely run the first transaction (T0), to fill the variables with some initial value.
     simulator.add_initialization_transaction_to_scheduler(scheduler)
@@ -63,16 +75,96 @@ def run_scheduling_test(args, test_file_path):
     simulator.add_workload_to_scheduler(scheduler)
     scheduler.run()
 
+    # Print 2 blank lines in the end of the run.
+    Logger().log()
+    Logger().log()
+
+    # Print the data:
+    Logger().log("Data in the end of the run:")
+    Logger().log(str(dict(scheduler.get_variables())))
+
+    if scheduler.scheduling_scheme == 'RR':
+        Logger().log("Serialization order:")
+        # serialization_order = scheduler.get_serialization_order()
+        Logger().log("TODO !!")  # TODO: print serialization order.
+
+    # Turn off the logger prefix.
+    Logger().prefix = ''
+
+
+def run_scheduling_test(args, test_file_path):
+    # Print indication for the begin of the current test.
+    test_str = '/'*22 + ' BEGIN TEST: `{}` '.format(test_file_path) + '\\'*22
+    Logger().prefix = ''
+    Logger().log('*'*len(test_str))
+    Logger().log(test_str)
+    Logger().log()
+
+    # The simulator is responsible for reading the workload test file and injecting the
+    # transactions into the scheduler. For each transaction, the simulator simulates an
+    # execution of the user program that manages this transaction. It means that values
+    # that are retrieved using read-operations might be stored temporarily in local
+    # variables of the program, and might be used later for as a value to write in a
+    # write-operation. The simulator is also responsible for restarting a transaction
+    # that ahs been aborted by the scheduler (due to a deadlock).
+    simulator = TransactionsWorkloadSimulator()
+
+    # Parse the workload test file and add its contents to the simulator.
+    simulator.load_test_data(test_file_path)
+
+    if args.sched != 'compare-all':
+        # Initialize the relevant scheduler.
+        # By default use the scheduling scheme mentioned in the test file.
+        # If a certain scheduling scheme mentioned explicitly in the arguments, use it.
+        romv_schedule_scheme = simulator.schedule
+        if args.sched == 'romv-rr':
+            romv_schedule_scheme = 'RR'
+        elif args.sched == 'romv-serial':
+            romv_schedule_scheme = 'serial'
+        scheduler = ROMVScheduler(romv_schedule_scheme) if args.sched != 'simple-serial' else SerialScheduler()
+
+        run_workload_simulator_on_scheduler(simulator, scheduler)
+
+    elif args.sched == 'compare-all':
+        romv_rr_scheduler = ROMVScheduler('RR')
+        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
+        romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
+
+        # TODO: add the transactions to serial schedulers by the `romv_rr_serialization_order`.
+
+        # romv_scheduler
+        romv_serial_scheduler = ROMVScheduler('serial')
+        simulator.reset_simulator()
+        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
+
+        # simple serial scheduler
+        simple_serial_scheduler = SerialScheduler()
+        simulator.reset_simulator()
+        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
+
+        # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
+
+    # Print two blank lines to indicate the end of each test.
+    Logger().prefix = ''
+    Logger().log()
+    test_str = '\\' * 22 + ' END TEST: `{}` '.format(test_file_path) + '/' * 22
+    Logger().log(test_str)
+    Logger().log('*' * len(test_str))
+    Logger().log()
+    Logger().log()
+
 
 if __name__ == '__main__':
     # Parse all input (optional) arguments for the scripts.
     args = args_parser()
 
-    test_files = args.tests  # TODO: make sure it always returns a list here.
+    test_files = args.tests
     if not test_files:
         test_files = [os.path.join(TESTS_DIR, filename)
                       for filename in os.listdir(TESTS_DIR)
                       if os.path.isfile(os.path.join(TESTS_DIR, filename))]
+    else:
+        assert isinstance(args.tests, list)
     # test_files = ['tests/basic-deadlock-test.txt']
     for test_file_path in test_files:
         run_scheduling_test(args, test_file_path)
