@@ -40,6 +40,8 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                           help='Verbose mode. Use in order to print the locks table whenever a lock is aquired or released.')
     add_feature_to_parser(parser, ['--log-wait-to', '-lw'], default=True,
                           help='Verbose mode. Use in order to print enumeration of the the transactions that an operation waits to.')
+    add_feature_to_parser(parser, ['--log-deadlock-cycle', '-ldlc'], default=True,
+                          help='Verbose mode. Use in order to print a found deadlock cycle caused reseting the transaction.')
     add_feature_to_parser(parser, ['--log-gc', '-lgc'], default=True,
                           help='Verbose mode. Use in order to print when the GC marks a version to be evicted and when actual eviction happens.')
     add_feature_to_parser(parser, ['--log-transaction-state', '-lts'], default=True,
@@ -48,6 +50,12 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                           help='Use in order to use Oded\' style for printing the log lines.')
     add_feature_to_parser(parser, ['--log-sched-prefix', '-lsp'], default=True,
                           help='Use in order to print the scheduling type in the right side of each printed run-log line.')
+
+    log_all_or_none = parser.add_mutually_exclusive_group(required=False)
+    log_all_or_none.add_argument('--log-all', '-la', action='store_true', default=False,
+                                 help='Turn on all logs.')
+    log_all_or_none.add_argument('--log-none', '-ln', action='store_true', default=False,
+                                 help='Turn off all logs.')
 
     return parser.parse_args()
 
@@ -59,13 +67,13 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     # Tell the logger to print the type of the current scheduler type as a prefix of each line of the run-log.
     indent_size = 6
     prefix = ''
-    if args.log_sched_prefix:
+    if Logger().is_log_type_set_on('sched_prefix'):
         prefix = scheduler_type_str
         prefix = prefix + ' ' * (16 - len(prefix)) + '|  '
         indent_size = len(prefix)
 
     # Header for the scheduler type.
-    nr_dashes = int((test_str_len - 4 - len(scheduler_type_str) - indent_size * (1 if args.log_sched_prefix else 2)) / 2)
+    nr_dashes = int((test_str_len - 4 - len(scheduler_type_str) - indent_size * (1 if Logger().is_log_type_set_on('sched_prefix') else 2)) / 2)
     Logger().log((' ' * indent_size) + ('-' * nr_dashes) + '  ' + scheduler_type_str + '  ' + ('-' * nr_dashes))
     Logger().log()
 
@@ -107,7 +115,7 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     Logger().prefix = ''
 
 
-def run_scheduling_test(args, test_file_path):
+def run_scheduling_test(scheduling_type, test_file_path):
     # Print indication for the begin of the current test.
     test_str = '/'*22 + ' BEGIN TEST: `{}` '.format(test_file_path) + '\\'*22
     test_str_len = len(test_str)
@@ -128,20 +136,20 @@ def run_scheduling_test(args, test_file_path):
     # Parse the workload test file and add its contents to the simulator.
     simulator.load_test_data(test_file_path)
 
-    if args.sched != 'compare-all':
+    if scheduling_type != 'compare-all':
         # Initialize the relevant scheduler.
         # By default use the scheduling scheme mentioned in the test file.
         # If a certain scheduling scheme mentioned explicitly in the arguments, use it.
         romv_schedule_scheme = simulator.schedule
-        if args.sched == 'romv-rr':
+        if scheduling_type == 'romv-rr':
             romv_schedule_scheme = 'RR'
-        elif args.sched == 'romv-serial':
+        elif scheduling_type == 'romv-serial':
             romv_schedule_scheme = 'serial'
-        scheduler = ROMVScheduler(romv_schedule_scheme) if args.sched != 'simple-serial' else SerialScheduler()
+        scheduler = ROMVScheduler(romv_schedule_scheme) if scheduling_type != 'simple-serial' else SerialScheduler()
 
         run_workload_simulator_on_scheduler(simulator, scheduler, test_str_len)
 
-    elif args.sched == 'compare-all':
+    elif scheduling_type == 'compare-all':
         romv_rr_scheduler = ROMVScheduler('RR')
         run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler, test_str_len)
         romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
@@ -180,8 +188,15 @@ if __name__ == '__main__':
     args = args_parser()
 
     for arg_name, arg_value in vars(args).items():
-        if arg_name.startswith('log_'):
-            Logger().toggle_log_type(arg_name[4:], arg_value)
+        if not arg_name.startswith('log_'):
+            continue
+        if arg_name != 'log_all' and arg_name != 'log_none' and arg_name != 'log_oded_style':
+            print(arg_name)
+            if args.log_all:
+                arg_value = True
+            elif args.log_none:
+                arg_value = False
+        Logger().toggle_log_type(arg_name[4:], arg_value)
 
     test_files = args.tests
     if not test_files:
@@ -192,4 +207,4 @@ if __name__ == '__main__':
         assert isinstance(args.tests, list)
     # test_files = ['tests/basic-deadlock-test.txt']
     for test_file_path in test_files:
-        run_scheduling_test(args, test_file_path)
+        run_scheduling_test(args.sched, test_file_path)

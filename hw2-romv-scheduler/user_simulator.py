@@ -1,6 +1,5 @@
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
-from itertools import chain
 from scheduler_base_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
 from logger import Logger
 
@@ -17,7 +16,7 @@ class SchedulerExecutionLogger:
                       if Logger().is_log_type_set_on('transaction_state') else '')
         action_no = 'action ' + (str(operation_simulator.operation_number).ljust(2)) \
             if not Logger().is_log_type_set_on('transaction_state') else ''
-        wait_str = ' WAIT' if Logger().is_log_type_set_on('transaction_state') else ' WAITING'
+        wait_str = 'WAIT' if Logger().is_log_type_set_on('transaction_state') else ' WAITING'
         Logger().log("{trans} {action_no}{waiting}{full_state}".format(
             trans=transaction_simulator.to_log_str(),
             action_no=action_no,
@@ -404,13 +403,11 @@ class TransactionSimulator:
         self.add_next_operation_to_transaction_if_needed()
 
     def to_full_state_str(self):
-        completed_operations = (('   ' + str(transaction_simulator).ljust(11)
+        max_operation_str_size = 11
+        completed_operations = (('   ' + str(transaction_simulator).ljust(max_operation_str_size)
                                  for transaction_simulator
                                  in self._completed_operation_simulators_queue))
-        #current_awaiting_operation = ()
-        #if len(self._ongoing_operation_simulators_queue) > 0:
-        #    current_awaiting_operation = ('->' + str(self._ongoing_operation_simulators_queue[0]), )
-        next_awaiting_operations = (str(transaction_simulator).ljust(11)
+        next_awaiting_operations = (str(transaction_simulator).ljust(max_operation_str_size)
                                     for transaction_simulator
                                     in self._ongoing_operation_simulators_queue)
         return ''.join(completed_operations) + ' > ' + '   '.join(next_awaiting_operations)
