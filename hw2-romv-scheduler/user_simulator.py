@@ -15,10 +15,13 @@ class SchedulerExecutionLogger:
     def transaction_action(transaction_simulator, operation_simulator):
         full_state = (' ' + transaction_simulator.to_full_state_str()
                       if Logger().is_log_type_set_on('transaction_state') else '')
-        Logger().log("{trans} action {action_no}{waiting}{full_state}".format(
+        action_no = 'action ' + (str(operation_simulator.operation_number).ljust(2)) \
+            if not Logger().is_log_type_set_on('transaction_state') else ''
+        wait_str = ' WAIT' if Logger().is_log_type_set_on('transaction_state') else ' WAITING'
+        Logger().log("{trans} {action_no}{waiting}{full_state}".format(
             trans=transaction_simulator.to_log_str(),
-            action_no=str(operation_simulator.operation_number).ljust(2),
-            waiting=(' ' * len(' WAITING') if operation_simulator.operation is None or operation_simulator.operation.is_completed else ' WAITING'),
+            action_no=action_no,
+            waiting=(' ' * len(wait_str) if operation_simulator.operation is None or operation_simulator.operation.is_completed else wait_str),
             full_state=full_state))
 
     @staticmethod
