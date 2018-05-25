@@ -14,7 +14,8 @@ class DeadlockDetector:
 
     # Returns whether a dependency cycle has been created because of this new waiting.
     # If not, add the constrain to (add the matching edge to the graph).
-    # add the edge and check if it creates deadlock - if so : remove edge, return false . else return true
+    # Add the edge and check if it creates deadlock-cycle.
+    # If so, remove edge and return such a cycle; Otherwise return None.
     def wait_for(self, waiting_transaction_id, waiting_for_transaction_id):
         if not(self._wait_for_graph.has_node(waiting_transaction_id)):
             self._wait_for_graph.add_node(waiting_transaction_id)
@@ -22,10 +23,11 @@ class DeadlockDetector:
             self._wait_for_graph.add_node(waiting_for_transaction_id)
 
         self._wait_for_graph.add_edge(waiting_transaction_id, waiting_for_transaction_id)
-        if self.is_deadlock():
+        deadlock_cycle = self.find_deadlock_cycle()
+        if deadlock_cycle is not None:
             self._wait_for_graph.remove_edge(waiting_transaction_id, waiting_for_transaction_id)
-            return False
-        return True
+            return deadlock_cycle
+        return None
 
     # delete this transaction and the relevant edges when a certain transaction ends.
     def transaction_ended(self, ended_transaction_id):
@@ -34,13 +36,12 @@ class DeadlockDetector:
             self._wait_for_graph.remove_node(ended_transaction_id)
 
     # checks if there is a cycle in the graph - is so returns true, else return false.
-    def is_deadlock(self):
+    def find_deadlock_cycle(self):
         try:
             cycle = nx.find_cycle(self._wait_for_graph, orientation='original')
-            Logger().log('    >> is_deadlock() : found cycle {}'.format(cycle), 'scheduler_verbose')
-            return True
+            return cycle
         except nx.NetworkXNoCycle:
-            return False
+            return None
 
 
 class LocksManager:
@@ -93,13 +94,13 @@ class LocksManager:
                 assert variable not in self._write_locks_table or self._write_locks_table[variable] == transaction_id
                 self._write_locks_table[variable] = transaction_id
                 self._transactions_locks_sets[transaction_id].write_locks.add(variable)
-            return 'GOT_LOCK'
+            return 'GOT_LOCK', None
         assert isinstance(collides_with, set) and len(collides_with) > 0
         for wait_for_tid in collides_with:
-            deadlock_detected = not self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
-            if deadlock_detected:
-                return 'DEADLOCK'
-        return 'WAIT'
+            deadlock_cycle_detected = self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
+            if deadlock_cycle_detected is not None:
+                return 'DEADLOCK', deadlock_cycle_detected
+        return 'WAIT', collides_with
 
     # when transaction_id is done, we release all of its acquired locks and remove it from the "wait-for" graph.
     def release_all_locks(self, transaction_id):
@@ -123,7 +124,7 @@ class LocksManager:
 
     # returns if there is a deadlock at the moment
     def is_deadlock(self):
-        return self._deadlock_detector.is_deadlock()
+        return self._deadlock_detector.find_deadlock_cycle() is not None
 
 
 # The class is responsible for managing the versions of values of the variables in the system.
@@ -539,6 +540,14 @@ class MultiVersionGC:
         return younger_transaction.committed_variables_set_since_last_reader_born
 
 
+class DeadlockCycleAbortReason:
+    def __init__(self, deadlock_cycle):
+        self.deadlock_cycle = deadlock_cycle
+
+    def __str__(self):
+        return 'Deadlock cycle found: ' + str(self.deadlock_cycle)
+
+
 # TODO: fully doc it!
 # When the `Scheduler` encounters a deadlock, it chooses a victim transaction and aborts it.
 # It means that the scheduler would have to store the operations in a redo-log. (is that correct?)
@@ -620,17 +629,18 @@ class ROMVScheduler(Scheduler):
         assert not transaction.is_read_only
         assert isinstance(transaction, UMVTransaction)
 
-        got_lock = self._locks_manager.try_acquire_lock(transaction_id, variable, 'write')
+        got_lock, collides_with__or__deadlock_cycle = self._locks_manager.try_acquire_lock(transaction_id, variable, 'write')
         if got_lock == 'DEADLOCK':
             # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
             #            Each time a transaction attempts to lock a variable, the conflict graph
             #            is updated. When a conflict cycle is firstly created it is immediately
             #            detected and then immediately broken by the scheduler.
             # TODO: maybe abort another transaction?
-            self.abort_transaction(transaction)  # FIXME: is it ok to call it here?
+            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))  # FIXME: is it ok to call it here?
             assert not self._locks_manager.is_deadlock()
             return False  # failed
         elif got_lock == 'WAIT':
+            transaction.waits_for = collides_with__or__deadlock_cycle
             return False  # failed
 
         assert got_lock == 'GOT_LOCK'
@@ -648,17 +658,19 @@ class ROMVScheduler(Scheduler):
             return self._mv_data_manager.read_older_version_than(variable, transaction.timestamp)
 
         assert isinstance(transaction, UMVTransaction)
-        got_lock = self._locks_manager.try_acquire_lock(transaction_id, variable, 'read')
+        got_lock, collides_with__or__deadlock_cycle = self._locks_manager.try_acquire_lock(transaction_id, variable, 'read')
         if got_lock == 'DEADLOCK':
             # Invariant: At any point in time, there is no cycle in the "wait-for" graph.
             #            Each time a transaction attempts to lock a variable, the conflict graph
             #            is updated. When a conflict cycle is firstly created it is immediately
             #            detected and then immediately broken by the scheduler.
             # TODO: maybe abort another transaction?
-            self.abort_transaction(transaction)  # FIXME: is it ok to call it here?
+            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))  # FIXME: is it ok to call it here?
             assert not self._locks_manager.is_deadlock()
             return None  # failed
         elif got_lock == 'WAIT':
+            assert isinstance(collides_with__or__deadlock_cycle, set)
+            transaction.waits_for = collides_with__or__deadlock_cycle
             return None  # failed
 
         assert got_lock == 'GOT_LOCK'
@@ -669,7 +681,7 @@ class ROMVScheduler(Scheduler):
         return self._mv_data_manager.read_latest_version(variable)
 
     # TODO: doc!
-    def abort_transaction(self, transaction: Transaction):
+    def abort_transaction(self, transaction: Transaction, reason):
         assert not transaction.is_read_only
         assert isinstance(transaction, UMVTransaction)
         self._locks_manager.release_all_locks(transaction.transaction_id)
@@ -682,7 +694,7 @@ class ROMVScheduler(Scheduler):
         # transaction id) has been added before the aborted transaction in the transactions
         # list sorted by transaction_id. So that the iteration in `run(..)` won't encounter
         # this transaction again until next loop (in RR scheduling scheme).
-        transaction.abort(self)
+        transaction.abort(self, reason)
         # TODO: Undo the transaction. We currently storing the updates locally on the transaction itself only.
 
     # For the GC mechanism, when a read-only transaction commits, we need to find the

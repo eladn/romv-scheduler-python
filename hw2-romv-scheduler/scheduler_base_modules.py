@@ -177,6 +177,11 @@ class Transaction:
         self.ro_transactions_by_arrival_list_node = None
         self.u_transactions_by_arrival_list_node = None
 
+        # When a transaction tries to perform its operation, and the scheduler cannot acquire locks
+        # because of other transactions, it assigns to this public field the set of transactions
+        # that the current transaction is waiting for. It is used later in the run-log printings.
+        self.waits_for = None
+
     @property
     def transaction_id(self):
         return self._transaction_id
@@ -230,6 +235,8 @@ class Transaction:
     def try_perform_next_operation(self, scheduler):
         assert len(self._waiting_operations_queue) > 0
 
+        self.waits_for = None
+
         next_operation = self._waiting_operations_queue[0]
         next_operation.try_perform(scheduler)
 
@@ -251,14 +258,14 @@ class Transaction:
         return next_operation
 
     # called by the scheduler after removing this transaction from it's transactions list.
-    def abort(self, scheduler):
+    def abort(self, scheduler, reason):
         assert not self._is_aborted and not self._is_completed
         assert self._transaction_id is not None
         assert scheduler.get_transaction_by_id(self._transaction_id) is None
         self._is_aborted = True
         # TODO: what else should be done here?
         if self._on_transaction_aborted_callback:
-            self._on_transaction_aborted_callback(self, scheduler)
+            self._on_transaction_aborted_callback(self, scheduler, reason)
 
     def add_operation(self, operation: Operation):
         assert not self._is_read_only or operation.get_type() != 'write'

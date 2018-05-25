@@ -38,7 +38,7 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                           help='Verbose mode. Use in order to print the variables values after each change.')
     add_feature_to_parser(parser, ['--log-locks', '-ll'], default=True,
                           help='Verbose mode. Use in order to print the locks table whenever a lock is aquired or released.')
-    add_feature_to_parser(parser, ['--log-wait-to', '-lw'], default=True,
+    add_feature_to_parser(parser, ['--log-wait-for', '-lw'], default=True,
                           help='Verbose mode. Use in order to print enumeration of the the transactions that an operation waits to.')
     add_feature_to_parser(parser, ['--log-deadlock-cycle', '-ldlc'], default=True,
                           help='Verbose mode. Use in order to print a found deadlock cycle caused reseting the transaction.')

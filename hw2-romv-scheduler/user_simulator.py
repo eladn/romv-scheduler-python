@@ -7,8 +7,10 @@ from logger import Logger
 # Used to print the status to output log.
 class SchedulerExecutionLogger:
     @staticmethod
-    def transaction_reset(transaction_simulator):
-        Logger().log("{trans} reset".format(trans=transaction_simulator.to_log_str()))
+    def transaction_reset(transaction_simulator, abort_reason):
+        reason = '   reason: ' + str(abort_reason) if Logger().is_log_type_set_on('deadlock_cycle') else ''
+        Logger().log("{trans} RESET{abort_reason}".format(trans=transaction_simulator.to_log_str(),
+                                                          abort_reason=reason))
 
     @staticmethod
     def transaction_action(transaction_simulator, operation_simulator):
@@ -16,12 +18,16 @@ class SchedulerExecutionLogger:
                       if Logger().is_log_type_set_on('transaction_state') else '')
         action_no = 'action ' + (str(operation_simulator.operation_number).ljust(2)) \
             if not Logger().is_log_type_set_on('transaction_state') else ''
+        is_waiting = (operation_simulator.operation is not None and not operation_simulator.operation.is_completed)
         wait_str = 'WAIT' if Logger().is_log_type_set_on('transaction_state') else ' WAITING'
         Logger().log("{trans} {action_no}{waiting}{full_state}".format(
             trans=transaction_simulator.to_log_str(),
             action_no=action_no,
-            waiting=(' ' * len(wait_str) if operation_simulator.operation is None or operation_simulator.operation.is_completed else wait_str),
+            waiting=(wait_str if is_waiting else ' ' * len(wait_str)),
             full_state=full_state))
+        if is_waiting:
+            Logger().log('     Waiting for locks from transactions: ' + str(transaction_simulator.transaction.waits_for),
+                         log_type_name='wait_for')
 
     @staticmethod
     def print_variables(scheduler: Scheduler):
@@ -190,6 +196,10 @@ class TransactionSimulator:
         self._ongoing_operation_simulators_queue = None
         self._completed_operation_simulators_queue = None
         self._execution_attempt_no = 0  # incremented each time adding the transaction to a scheduler.
+
+    @property
+    def transaction(self):
+        return self._transaction
 
     # Factory function. creates a `TransactionSimulator` from a test line.
     @staticmethod
@@ -387,12 +397,12 @@ class TransactionSimulator:
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
         SchedulerExecutionLogger.print_variables(scheduler)
 
-    def transaction_aborted(self, transaction: Transaction, scheduler: Scheduler):
+    def transaction_aborted(self, transaction: Transaction, scheduler: Scheduler, abort_reason):
         assert self._transaction is not None
         assert self._transaction.is_aborted
 
         # print to execution log!
-        SchedulerExecutionLogger.transaction_reset(self)
+        SchedulerExecutionLogger.transaction_reset(self, abort_reason)
         SchedulerExecutionLogger.print_variables(scheduler)
 
         self.reset_transaction(scheduler)
