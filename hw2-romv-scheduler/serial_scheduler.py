@@ -15,10 +15,11 @@ class SerialScheduler(Scheduler):
             # The user haven't yet not assigned the next operation to perform for that transaction.
             if not transaction.has_waiting_operation_to_perform(self):
                 continue
-            
+
             operation = transaction.try_perform_next_operation(self)
             assert operation.is_completed
             if transaction.is_completed:
+                self.serialization_point(transaction.transaction_id)
                 self.mark_transaction_to_remove(transaction)
 
     def try_write(self, transaction_id, variable, value):

@@ -99,8 +99,7 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
 
     if scheduler.scheduling_scheme == 'RR':
         Logger().log("Serialization order:")
-        # serialization_order = scheduler.get_serialization_order()
-        Logger().log("TODO !!")  # TODO: print serialization order.
+        Logger().log(str(list(scheduler.get_serialization_order())))
 
     # Turn off the logger prefix.
     Logger().prefix = ''
@@ -143,7 +142,7 @@ def run_scheduling_test(args, test_file_path):
     elif args.sched == 'compare-all':
         romv_rr_scheduler = ROMVScheduler('RR')
         run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler, test_str_len)
-        #romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
+        romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
 
         # TODO: add the transactions to serial schedulers by the `romv_rr_serialization_order`.
 
@@ -162,6 +161,7 @@ def run_scheduling_test(args, test_file_path):
         run_workload_simulator_on_scheduler(simulator, simple_serial_scheduler, test_str_len)
 
         # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
+        # TODO: compare the local variables of the operation simulators!
 
     # Print two blank lines to indicate the end of each test.
     Logger().prefix = ''

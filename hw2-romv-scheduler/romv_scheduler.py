@@ -492,7 +492,7 @@ class ROMVScheduler(Scheduler):
             assert isinstance(transaction, ROMVTransaction)
             # Behaviour changed: We now assign timestamp only when the first read operation is being tried to be performed.
             ## Assign new timestamp for RO transactions.
-            ## transaction.timestamp = self._timestamps_manager.get_next_ts()
+            ## self.assign_timestamp_to_transaction(transaction)
             ## self._mv_gc.new_read_only_transaction(transaction)
         else:
             assert isinstance(transaction, UMVTransaction)
@@ -512,7 +512,7 @@ class ROMVScheduler(Scheduler):
             # Assign new timestamp for RO transactions when trying to perform the first read.
             if transaction.is_read_only and not transaction.has_timestamp:
                 assert isinstance(transaction, ROMVTransaction)
-                transaction.timestamp = self._timestamps_manager.get_next_ts()
+                self.assign_timestamp_to_transaction(transaction)
                 self._mv_gc.new_read_only_transaction(transaction)
 
             # Try execute next operation
@@ -530,11 +530,15 @@ class ROMVScheduler(Scheduler):
                 self.mark_transaction_to_remove(transaction)  # TODO: does it have to be after handling the completed transaction?
                 if not transaction.is_read_only:
                     assert isinstance(transaction, UMVTransaction)
-                    transaction.timestamp = self._timestamps_manager.get_next_ts()
+                    self.assign_timestamp_to_transaction(transaction)
                     transaction.complete_writes(self._mv_data_manager)
                     self._locks_manager.release_all_locks(transaction.transaction_id)
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
                 self._mv_gc.run_waiting_gc_jobs(self)
+
+    def assign_timestamp_to_transaction(self, transaction: Transaction):
+        transaction.timestamp = self._timestamps_manager.get_next_ts()
+        self.serialization_point(transaction.transaction_id)
 
     # TODO: doc!
     def try_write(self, transaction_id, variable, value):

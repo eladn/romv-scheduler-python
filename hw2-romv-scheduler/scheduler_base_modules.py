@@ -325,6 +325,10 @@ class Scheduler(ABC):
         # It is done by calling `scheduler.get_transaction_by_id(tid)` that is using this mapping.
         self._ongoing_transactions_mapping = dict()
 
+        # Each time a transaction reaches its serialization point, the method `serialization_point()` is called,
+        # with the serialized transaction id, and this transaction id is added to this list.
+        self._serialization_order = []
+
     @property
     def scheduling_scheme(self):
         return self._scheduling_scheme
@@ -432,6 +436,14 @@ class Scheduler(ABC):
             # Hence, we only mark transactions for deletion while iterating, and on the end
             # of each outer loop we remove all of the transaction that are marked to be removed.
             self.remove_marked_to_remove_transactions()
+
+    # Each time a transaction reaches its serialization point, the method `serialization_point()` is called with
+    # the serialized transaction id.
+    def serialization_point(self, transaction_id):
+        self._serialization_order.append(transaction_id)
+
+    def get_serialization_order(self):
+        return iter(self._serialization_order)
 
     # Called by the scheduler each time the method `add_transaction()` is called.
     # Might be overridden by the inheritor scheduler, if it has to do something
