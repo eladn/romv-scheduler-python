@@ -52,14 +52,25 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
     return parser.parse_args()
 
 
-def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: Scheduler):
+def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: Scheduler, test_str_len: int):
     scheduler_type_str = 'ROMV ' + scheduler.scheduling_scheme if isinstance(scheduler,
                                                                              ROMVScheduler) else 'simple-serial'
 
     # Tell the logger to print the type of the current scheduler type as a prefix of each line of the run-log.
+    indent_size = 6
+    prefix = ''
     if args.log_sched_prefix:
         prefix = scheduler_type_str
-        Logger().prefix = prefix + ' ' * (16 - len(prefix)) + '|  '
+        prefix = prefix + ' ' * (16 - len(prefix)) + '|  '
+        indent_size = len(prefix)
+
+    # Header for the scheduler type.
+    nr_dashes = int((test_str_len - 4 - len(scheduler_type_str) - indent_size * (1 if args.log_sched_prefix else 2)) / 2)
+    Logger().log((' ' * indent_size) + ('-' * nr_dashes) + '  ' + scheduler_type_str + '  ' + ('-' * nr_dashes))
+    Logger().log()
+
+    # Tell the logger to print the type of the current scheduler type as a prefix of each line of the run-log.
+    Logger().prefix = prefix
 
     # Firstly, completely run the first transaction (T0), to fill the variables with some initial value.
     simulator.add_initialization_transaction_to_scheduler(scheduler)
@@ -98,8 +109,9 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
 def run_scheduling_test(args, test_file_path):
     # Print indication for the begin of the current test.
     test_str = '/'*22 + ' BEGIN TEST: `{}` '.format(test_file_path) + '\\'*22
+    test_str_len = len(test_str)
     Logger().prefix = ''
-    Logger().log('*'*len(test_str))
+    Logger().log('*' * test_str_len)
     Logger().log(test_str)
     Logger().log()
 
@@ -126,24 +138,28 @@ def run_scheduling_test(args, test_file_path):
             romv_schedule_scheme = 'serial'
         scheduler = ROMVScheduler(romv_schedule_scheme) if args.sched != 'simple-serial' else SerialScheduler()
 
-        run_workload_simulator_on_scheduler(simulator, scheduler)
+        run_workload_simulator_on_scheduler(simulator, scheduler, test_str_len)
 
     elif args.sched == 'compare-all':
         romv_rr_scheduler = ROMVScheduler('RR')
-        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
-        romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
+        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler, test_str_len)
+        #romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
 
         # TODO: add the transactions to serial schedulers by the `romv_rr_serialization_order`.
+
+        Logger().log()
 
         # romv_scheduler
         romv_serial_scheduler = ROMVScheduler('serial')
         simulator.reset_simulator()
-        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
+        run_workload_simulator_on_scheduler(simulator, romv_serial_scheduler, test_str_len)
+
+        Logger().log()
 
         # simple serial scheduler
         simple_serial_scheduler = SerialScheduler()
         simulator.reset_simulator()
-        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler)
+        run_workload_simulator_on_scheduler(simulator, simple_serial_scheduler, test_str_len)
 
         # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
 
