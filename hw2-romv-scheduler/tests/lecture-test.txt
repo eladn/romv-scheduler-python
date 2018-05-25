@@ -1,7 +1,18 @@
 2 6
 U 0 w(x,1) w(y,2) w(z,3) c0;
 R 1 a0=r(x) a1=r(y) c1;
-U 2 w(x,1) b0=r(y) w(y,b0) c2;
-U 3 c0=r(x) w(x,c0) c3;
+U 2 w(x,1) b0=r(y) w(y,5) c2;
+U 3 c0=r(x) w(x,8) c3;
 R 4 d0=r(z) d1=r(x) c4;
 R 5 e0=r(z) e1=r(x) c5;
+
+#output by rounds:
+# R1:1 U2:1 U3:1WAIT R4:1 R5:1
+# R1:2 U2:2 U3:1WAIT R4:2 R5:2
+# R1:3 U2:3 U3:1WAIT R4:3 R5:3
+#      U2:4 U3:1
+#           U3:2
+#           U3:3
+
+#expected output:
+#{x:[("8",6)],y:[("5",5)],z:[("3",1])}
