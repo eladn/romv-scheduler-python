@@ -174,6 +174,7 @@ def run_scheduling_test(scheduling_type, test_file_path):
 
         # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
         # TODO: compare the local variables of the operation simulators!
+        TransactionsWorkloadSimulator.compare_runs(romv_rr_simulator, romv_serial_simulator, simple_serial_simulator)
 
     # Print two blank lines to indicate the end of each test.
     Logger().prefix = ''

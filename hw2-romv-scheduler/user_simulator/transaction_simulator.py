@@ -1,6 +1,6 @@
 from user_simulator.transaction_parsing_patterns import TransactionParsingPatterns
-from user_simulator.operation_simulator import ReadOperationSimulator, WriteOperationSimulator, \
-    CommitOperationSimulator, SuspendOperationSimulator
+from user_simulator.operation_simulator import OperationSimulator, ReadOperationSimulator, \
+    WriteOperationSimulator, CommitOperationSimulator, SuspendOperationSimulator
 from operation import Operation, ReadOperation, WriteOperation, CommitOperation
 from transaction import Transaction
 from scheduler_interface import SchedulerInterface
@@ -78,6 +78,11 @@ class TransactionSimulator:
         self._ongoing_operation_simulators_queue = None
         self._completed_operation_simulators_queue = None
         self._execution_attempt_no = 0  # incremented each time adding the transaction to a scheduler.
+
+    def clone(self):
+        new_transaction_simulator = TransactionSimulator(self.transaction_id, self._is_read_only)
+        new_transaction_simulator._all_operation_simulators = copy.deepcopy(self._all_operation_simulators)
+        return new_transaction_simulator
 
     @property
     def transaction(self):
@@ -327,3 +332,28 @@ class TransactionSimulator:
             transaction_id=self._transaction_id,
             is_ro=('R' if self._is_read_only else 'U'),
             execution_attempt_number=execution_attempt_number_str)
+
+    class NotEqualException(ValueError):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def compare_all(*transaction_simulators):
+        assert len(transaction_simulators) > 1
+        assert all(isinstance(transaction_simulator, TransactionSimulator)
+                   for transaction_simulator in transaction_simulators)
+        if any(transaction_simulator._completed_operation_simulators_queue is None
+               for transaction_simulator in transaction_simulators):
+            raise TransactionSimulator.NotEqualException(
+                'At least one of the transaction simulators has no active running simulation.')
+        if any(len(transaction_simulator._ongoing_operation_simulators_queue) > 0
+               for transaction_simulator in transaction_simulators):
+            raise TransactionSimulator.NotEqualException(
+                'At least one of the transaction simulators has uncompleted ongoing operations.')
+        if len(set((len(transaction_simulator._completed_operation_simulators_queue)
+                    for transaction_simulator in transaction_simulators))) > 1:
+            raise TransactionSimulator.NotEqualException(
+                'Not all transaction simulators have the same number of completed operation simulators.')
+        for operation_simulators in zip(*(transaction_simulator._completed_operation_simulators_queue
+                                          for transaction_simulator in transaction_simulators)):
+            OperationSimulator.compare_all(*operation_simulators)

@@ -24,6 +24,22 @@ class OperationSimulator:
     def __str__(self):
         return 'unknown-operation'
 
+    class NotEqualException(ValueError):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def compare_all(*operation_simulators):
+        assert len(operation_simulators) > 1
+        assert all(isinstance(operation_simulator, OperationSimulator)
+                   for operation_simulator in operation_simulators)
+        if len(set((type(operation_simulator)
+                    for operation_simulator in operation_simulators))) > 1:
+            raise OperationSimulator.NotEqualException(
+                'Not all operation simulators are of the same type.')
+        operation_simulator_type = type(operation_simulators[0])
+        operation_simulator_type.compare_all(*operation_simulators)
+
 
 class ReadOperationSimulator(OperationSimulator):
     def __init__(self, operation: Operation, operation_number: int, dest_local_variable_name: str):
@@ -40,6 +56,29 @@ class ReadOperationSimulator(OperationSimulator):
         if self.operation.is_completed:
             ret_str += '=' + self.operation.read_value
         return ret_str
+
+    @staticmethod
+    def compare_all(*operation_simulators):
+        assert len(operation_simulators) > 1
+        assert all(isinstance(operation_simulator, ReadOperationSimulator)
+                   for operation_simulator in operation_simulators)
+        assert all(operation_simulator.operation.is_completed
+                   for operation_simulator in operation_simulators)
+        if len(set(((operation_simulator._dest_local_variable_name,
+                     operation_simulator.operation_number,
+                     operation_simulator.operation.variable,
+                     operation_simulator.operation.transaction_id)
+                    for operation_simulator in operation_simulators))) > 1:
+            raise OperationSimulator.NotEqualException(
+                'Not all read operation simulators are identical.')
+        if len(set((operation_simulator.operation.read_value
+                    for operation_simulator in operation_simulators))) > 1:
+            raise OperationSimulator.NotEqualException(
+                'Read operation simulators: #{operation_number} transation id: {tid}. Not all read-operation-simulators read the same value. {values}'.format(
+                    operation_number=operation_simulators[0].operation_number,
+                    tid=operation_simulators[0].operation.transaction_id,
+                    values=(', '.join(str(operation_simulator) for operation_simulator in operation_simulators))
+                ))
 
 
 class WriteOperationSimulator(OperationSimulator):
@@ -69,6 +108,30 @@ class WriteOperationSimulator(OperationSimulator):
         ret_str = 'w(' + self.operation.variable + ', ' + src_value_to_write + actual_value_written + ')'
         return ret_str
 
+    @staticmethod
+    def compare_all(*operation_simulators):
+        assert len(operation_simulators) > 1
+        assert all(isinstance(operation_simulator, WriteOperationSimulator)
+                   for operation_simulator in operation_simulators)
+        assert all(operation_simulator.operation.is_completed
+                   for operation_simulator in operation_simulators)
+        if len(set(((operation_simulator._src_local_variable_name,
+                     operation_simulator._const_val,
+                     operation_simulator.operation_number,
+                     operation_simulator.operation.variable,
+                     operation_simulator.operation.transaction_id)
+                    for operation_simulator in operation_simulators))) > 1:
+            raise OperationSimulator.NotEqualException(
+                'Not all write operation simulators are identical.')
+        if len(set((operation_simulator.operation.to_write_value
+                    for operation_simulator in operation_simulators))) > 1:
+            raise OperationSimulator.NotEqualException(
+                'Write operation simulators: #{operation_number} transation id: {tid}. Not all write-operation-simulators written the same value. {values}'.format(
+                    operation_number=operation_simulators[0].operation_number,
+                    tid=operation_simulators[0].operation.transaction_id,
+                    values=(', '.join(str(operation_simulator) for operation_simulator in operation_simulators))
+                ))
+
 
 class CommitOperationSimulator(OperationSimulator):
     def __init__(self, *args, **kwargs):
@@ -77,6 +140,14 @@ class CommitOperationSimulator(OperationSimulator):
     def __str__(self):
         return 'commit'
 
+    @staticmethod
+    def compare_all(*operation_simulators):
+        assert len(operation_simulators) > 1
+        assert all(isinstance(operation_simulator, CommitOperationSimulator)
+                   for operation_simulator in operation_simulators)
+        assert all(operation_simulator.operation.is_completed
+                   for operation_simulator in operation_simulators)
+
 
 class SuspendOperationSimulator(OperationSimulator):
     def __init__(self, operation_number: int):
@@ -84,3 +155,11 @@ class SuspendOperationSimulator(OperationSimulator):
 
     def __str__(self):
         return 'suspend'
+
+    @staticmethod
+    def compare_all(*operation_simulators):
+        assert len(operation_simulators) > 1
+        assert all(isinstance(operation_simulator, SuspendOperationSimulator)
+                   for operation_simulator in operation_simulators)
+        assert all(operation_simulator.operation is None
+                   for operation_simulator in operation_simulators)

@@ -4,13 +4,21 @@ from scheduler_interface import SchedulerInterface
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 
 
-
 # Parse the input test file and add transactions and their operations to the given scheduler.
 class TransactionsWorkloadSimulator:
     def __init__(self):
         self._transaction_simulators = []
         self._transaction_id_to_transaction_simulator = dict()  # FIXME: maybe we don't need it
         self._schedule = 'RR'
+
+    def clone(self):
+        new_simulator = TransactionsWorkloadSimulator()
+        new_simulator._schedule = self._schedule
+        for transaction_simulator in self._transaction_simulators:
+            new_transaction_simulator = transaction_simulator.clone()
+            new_simulator._transaction_simulators.append(new_transaction_simulator)
+            new_simulator._transaction_id_to_transaction_simulator[new_transaction_simulator.transaction_id] = new_transaction_simulator
+        return new_simulator
 
     @property
     def schedule(self):
@@ -81,3 +89,16 @@ class TransactionsWorkloadSimulator:
         # FIXME: do we want to just detect it as first transaction?
         initialization_transaction = self._transaction_id_to_transaction_simulator[0]
         initialization_transaction.add_transaction_to_scheduler(scheduler)
+
+    class NotEqualException(ValueError):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def compare_runs(*simulators):
+        assert all(isinstance(simulator, TransactionsWorkloadSimulator) for simulator in simulators)
+        assert len(simulators) > 1
+        if len(set((len(simulator._transaction_simulators) for simulator in simulators))) > 1:
+            raise TransactionsWorkloadSimulator.NotEqualException('Not all transactions have the same number of transactions.')
+        for transaction_simulators in zip(*(simulator._transaction_simulators for simulator in simulators)):
+            TransactionSimulator.compare_all(*transaction_simulators)
