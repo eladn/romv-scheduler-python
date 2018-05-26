@@ -116,6 +116,12 @@ class DoublyLinkedList:
             yield current_node.data
             current_node = current_node.next_node
 
+    def __reversed__(self):
+        current_node = self.last
+        while current_node is not None:
+            yield current_node.data
+            current_node = current_node.prev_node
+
     def __len__(self):
         return self.count
 
