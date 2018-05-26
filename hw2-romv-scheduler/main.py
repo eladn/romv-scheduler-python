@@ -62,7 +62,8 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
     return parser.parse_args()
 
 
-def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: SchedulerInterface, test_str_len: int):
+def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: SchedulerInterface,
+                                        test_str_len: int, forced_run_order=None):
     scheduler_type_str = 'ROMV ' + scheduler.scheduling_scheme if isinstance(scheduler,
                                                                              ROMVScheduler) else 'simple-serial'
 
@@ -84,7 +85,8 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
 
     # Firstly, completely run the first transaction (T0), to fill the variables with some initial value.
     simulator.add_initialization_transaction_to_scheduler(scheduler)
-    scheduler.run()
+    if forced_run_order is None:
+        scheduler.run()
 
     # Print a blank line after the initialization.
     if not Logger().is_log_type_set_on('oded_style'):
@@ -98,7 +100,7 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     # the scheduler would remove the completed transaction from its transactions list, so it would not encounter
     # it anymore. The scheduler runs until all transactions are completed.
     simulator.add_workload_to_scheduler(scheduler)
-    scheduler.run()
+    scheduler.run(forced_run_order=forced_run_order)
 
     # Print a blank line in the end of the run.
     Logger().log()
@@ -154,7 +156,7 @@ def run_scheduling_test(scheduling_type, test_file_path):
         romv_rr_simulator = simulator.clone()
         romv_rr_scheduler = ROMVScheduler('RR')
         run_workload_simulator_on_scheduler(romv_rr_simulator, romv_rr_scheduler, test_str_len)
-        romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
+        romv_rr_serialization_order = list(romv_rr_scheduler.get_serialization_order())
 
         # TODO: add the transactions to serial schedulers by the `romv_rr_serialization_order`.
 
@@ -163,17 +165,20 @@ def run_scheduling_test(scheduling_type, test_file_path):
         # romv_scheduler
         romv_serial_simulator = simulator.clone()
         romv_serial_scheduler = ROMVScheduler('serial')
-        run_workload_simulator_on_scheduler(romv_serial_simulator, romv_serial_scheduler, test_str_len)
+        run_workload_simulator_on_scheduler(romv_serial_simulator, romv_serial_scheduler, test_str_len,
+                                            forced_run_order=romv_rr_serialization_order)
 
         Logger().log()
 
         # simple serial scheduler
         simple_serial_simulator = simulator.clone()
         simple_serial_scheduler = SerialScheduler()
-        run_workload_simulator_on_scheduler(simple_serial_simulator, simple_serial_scheduler, test_str_len)
+        run_workload_simulator_on_scheduler(simple_serial_simulator, simple_serial_scheduler, test_str_len,
+                                            forced_run_order=romv_rr_serialization_order)
 
         # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
-        # TODO: compare the local variables of the operation simulators!
+
+        # Compare the local variables of all of the operations of all of the transaction of the 3 operation simulators!
         TransactionsWorkloadSimulator.compare_runs(romv_rr_simulator, romv_serial_simulator, simple_serial_simulator)
 
     # Print two blank lines to indicate the end of each test.

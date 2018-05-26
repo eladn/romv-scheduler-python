@@ -134,7 +134,7 @@ class SchedulerInterface(ABC):
     # iterating over it. We solve this issue by only marking the transaction as "to be removed",
     # while iterating over the list. Later, in the end of each loop over the transactions, we
     # here perform the actual removal by calling `remove_marked_to_remove_transactions()`.
-    def iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
+    def iterate_over_ongoing_transactions_by_tid_and_safely_remove_marked_to_remove_transactions(self):
         while len(self._ongoing_transactions_by_tid) > 0:
             if self._scheduling_scheme == 'RR':
                 for transaction in self._ongoing_transactions_by_tid:
@@ -151,6 +151,24 @@ class SchedulerInterface(ABC):
             # Hence, we only mark transactions for deletion while iterating, and on the end
             # of each outer loop we remove all of the transaction that are marked to be removed.
             self.remove_marked_to_remove_transactions()
+
+    def iterate_over_ongoing_transactions_by_given_order_and_safely_remove_marked_to_remove_transactions(
+            self, forced_run_order):
+        assert forced_run_order is not None
+        forced_run_order = list(forced_run_order)
+        for tid in forced_run_order:
+            transaction = self.get_transaction_by_id(tid)
+            assert transaction is not None
+            while not transaction.is_completed:
+                assert not transaction.is_aborted
+                yield transaction
+                self.remove_marked_to_remove_transactions()
+
+    def iterate_over_ongoing_transactions_and_safely_remove_marked_to_remove_transactions(self, forced_run_order=None):
+        if forced_run_order is None:
+            return self.iterate_over_ongoing_transactions_by_tid_and_safely_remove_marked_to_remove_transactions()
+        return self.iterate_over_ongoing_transactions_by_given_order_and_safely_remove_marked_to_remove_transactions(
+            forced_run_order)
 
     # Each time a transaction reaches its serialization point, the method `serialization_point()` is called with
     # the serialized transaction id.
@@ -170,7 +188,7 @@ class SchedulerInterface(ABC):
     # Called by the user. Perform transactions until no transactions left.
     # Must be implemented by the inheritor scheduler.
     @abstractmethod
-    def run(self):
+    def run(self, forced_run_order=None):
         ...
 
     # Called by an operation of a transaction, when `next_operation.try_perform(..)` is called by its transaction.

@@ -10,8 +10,9 @@ class SerialScheduler(SchedulerInterface):
     def on_add_transaction(self, transaction: Transaction):
         pass  # We actually have nothing else to do here.
 
-    def run(self):
-        for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+    def run(self, forced_run_order=None):
+        for transaction in self.iterate_over_ongoing_transactions_and_safely_remove_marked_to_remove_transactions(
+                forced_run_order):
 
             # The user haven't yet not assigned the next operation to perform for that transaction.
             if not transaction.has_waiting_operation_to_perform(self):

@@ -58,8 +58,12 @@ class ROMVScheduler(SchedulerInterface):
         return self._timestamps_manager.peek_next_ts()
 
     # TODO: doc!
-    def run(self):
-        for transaction in self.iterate_over_transactions_by_tid_and_safely_remove_marked_to_remove_transactions():
+    def run(self, forced_run_order=None):
+        for transaction in self.iterate_over_ongoing_transactions_and_safely_remove_marked_to_remove_transactions(
+                forced_run_order):
+
+            # Flag that indicates whether the current transaction had been serialized in the current iteration.
+            # Used for printing the serialization log in the correct timing.
             serialization_point_flag = False
 
             # The user haven't yet not assigned the next operation to perform for that transaction.
@@ -95,6 +99,7 @@ class ROMVScheduler(SchedulerInterface):
                 self._mv_gc.transaction_committed(transaction, self)  # TODO: should it be before releasing locks?
                 self._mv_gc.run_waiting_gc_jobs(self)
 
+            # If the current transaction had been serialized in the current iteration - log it.
             if serialization_point_flag:
                 Logger().log('     Serialization point. Timestamp: {ts}'.format(ts=transaction.timestamp),
                              log_type_name='serialization_point')
