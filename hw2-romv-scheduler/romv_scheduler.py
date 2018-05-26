@@ -10,6 +10,7 @@ from doubly_linked_list import DoublyLinkedList
 import copy  # for deep-coping the disk in order to add the yet-committed variables so they could be printed to run-log.
 
 
+# Used for passing to the user callback when a transaction is aborted, as a reason for abortion.
 class DeadlockCycleAbortReason:
     def __init__(self, deadlock_cycle):
         self.deadlock_cycle = deadlock_cycle
@@ -18,9 +19,16 @@ class DeadlockCycleAbortReason:
         return 'Deadlock cycle found: ' + str(self.deadlock_cycle)
 
 
-# TODO: fully doc it!
+# The `ROMVScheduler` inherits from the basic `SchedulerInterface` and implements the ROMV protocol.
+# It mainly implements the methods: `run(..)`, `try_read(..)`, and `try_write(..)`.
+# We use the `LocksManager` for managing locks over the variables (which uses the `DeadlockDetector`).
 # When the `SchedulerInterface` encounters a deadlock, it chooses a victim transaction and aborts it.
-# It means that the scheduler would have to store the operations in a redo-log. (is that correct?)
+# For simplicity, the chosen victim is the first that closed the deadlock-cycle.
+# The updates made during the update-transaction are stored inside of a local mapping inside of the
+# update transaction. Find additional details about it under `UMVTransaction` class in `romv_transaction.py`.
+# We use the `MultiVersionDataManager` for managing the versions and accessing the disk.
+# We use the `MultiVersionGC` for evicting unnecessary old versions.
+# We use the `TimestampsManager` for assigning timestamps for transactions.
 class ROMVScheduler(SchedulerInterface):
     ROTransaction = ROMVTransaction
     UTransaction = UMVTransaction
@@ -35,8 +43,13 @@ class ROMVScheduler(SchedulerInterface):
         self._mv_gc = MultiVersionGC()
         self._timestamps_manager = TimestampsManager()
 
-        # TODO: doc!
         # This list is used by the garbage-collection mechanism.
+        # The GC needs it in order to efficiently find the youngest RO-transaction,
+        # and to find the youngest older RO-transaction of another given RO-transaction.
+        # Used by: `get_ongoing_youngest_read_only_transaction(..)`
+        #          `get_ongoing_read_only_transaction_older_than(..)`
+        # Maintained by `assign_timestamp_to_transaction(..)` and `on_transaction_removed(..)`.
+        # We never traverse this list in O(n).
         self._ongoing_ro_transactions_sorted_by_timestamp = DoublyLinkedList()
 
     @property
@@ -46,18 +59,28 @@ class ROMVScheduler(SchedulerInterface):
     def on_add_transaction(self, transaction: Transaction):
         if transaction.is_read_only:
             assert isinstance(transaction, ROMVTransaction)
-            # Behaviour changed: We now assign timestamp only when the first read operation is being tried to be performed.
-            ## Assign new timestamp for RO transactions.
-            ## self.assign_timestamp_to_transaction(transaction)
-            ## self._mv_gc.new_read_only_transaction(transaction)
+            # We assign timestamp to RO transactions only when the first read
+            # operation is being tried to be performed. We do so mainly in
+            # order to easily support of sustain method for our user-simulator.
         else:
             assert isinstance(transaction, UMVTransaction)
-            # TODO: should we do here something for update transaction?
+
+    def on_transaction_removed(self, transaction: Transaction):
+        if isinstance(transaction, ROMVTransaction):
+            transaction_node = transaction.ro_transactions_sorted_by_timestamp_list_node
+            assert transaction_node is not None
+            self._ongoing_ro_transactions_sorted_by_timestamp.remove_node(transaction_node)
 
     def get_current_ts(self):
         return self._timestamps_manager.peek_next_ts()
 
-    # TODO: doc!
+    # Run over the transaction via the chosen scheduling scheme (serial / RR).
+    # For each transaction encountered by that order, try to perform its next operation.
+    # The call to `transaction.try_perform_next_operation()` invokes `next_operation.try_perform(..)`
+    # which might invoke `scheduler.try_read(..)` or `scheduler.try_write(..)`.
+    # The last mentioned methods are implemented below (in that class).
+    # The main logics of the ROMV protocol is coded in these methods.
+    # We use the `LocksManager` for managing locks over the variables (which uses the deadlock detector).
     def run(self, forced_run_order=None):
         for transaction in self.iterate_over_ongoing_transactions_and_safely_remove_marked_to_remove_transactions(
                 forced_run_order):
@@ -108,11 +131,17 @@ class ROMVScheduler(SchedulerInterface):
         transaction.timestamp = self._timestamps_manager.get_next_ts()
         self.serialization_point(transaction.transaction_id)
         if isinstance(transaction, ROMVTransaction):
-            # TODO: doc!
+            # Now we add this RO transaction to the tail of the RO-transactions list sorted by timestamps.
+            # We also keep a pointer to the created node in this list, in order to efficiently traverse
+            # the list starting from a given transaction, when needed.
+            # the method `get_ongoing_read_only_transaction_older_than(..)` uses this.
             node = self._ongoing_ro_transactions_sorted_by_timestamp.push_back(transaction)
             transaction.ro_transactions_sorted_by_timestamp_list_node = node
 
-    # TODO: doc!
+    # Called by a write operation of a transaction, when `next_operation.try_perform(..)` is called
+    # by its transaction (when the scheduler invokes `transaction.try_perform_next_operation(..)`.
+    # Only update-transactions can invoke this method.
+    # It actually enforces the SS2PL as the ROMV protocol describes, using the lock manager.
     def try_write(self, transaction_id, variable, value):
         transaction = self.get_transaction_by_id(transaction_id)
         assert transaction is not None
@@ -125,8 +154,8 @@ class ROMVScheduler(SchedulerInterface):
             #            Each time a transaction attempts to lock a variable, the conflict graph
             #            is updated. When a conflict cycle is firstly created it is immediately
             #            detected and then immediately broken by the scheduler.
-            # TODO: maybe abort another transaction?
-            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))  # FIXME: is it ok to call it here?
+            # For simplicity, the chosen victim is the first that closed the deadlock-cycle.
+            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))
             assert not self._locks_manager.is_deadlock()
             return False  # failed
         elif got_lock == 'WAIT':
@@ -134,12 +163,15 @@ class ROMVScheduler(SchedulerInterface):
             return False  # failed
 
         assert got_lock == 'GOT_LOCK'
-        # FIXME: is this "local-storing" mechanism ok?
         transaction.local_write(variable, value)
         return True  # succeed writing the new value
 
-    # TODO: doc!
-    # Use the `_locks_manager` only for update transaction.
+    # Called by a read operation of a transaction, when `next_operation.try_perform(..)` is called
+    # by its transaction (when the scheduler invokes `transaction.try_perform_next_operation(..)`.
+    # For update-transactions, this method enforces the SS2PL as the ROMV protocol describes,
+    # using the lock manager.
+    # For read-only transaction, just ask the multi-version data manager for the correct version
+    # of the given variable.
     def try_read(self, transaction_id, variable):
         transaction = self.get_transaction_by_id(transaction_id)
         assert transaction is not None
@@ -156,8 +188,8 @@ class ROMVScheduler(SchedulerInterface):
             #            Each time a transaction attempts to lock a variable, the conflict graph
             #            is updated. When a conflict cycle is firstly created it is immediately
             #            detected and then immediately broken by the scheduler.
-            # TODO: maybe abort another transaction?
-            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))  # FIXME: is it ok to call it here?
+            # For simplicity, the chosen victim is the first that closed the deadlock-cycle.
+            self.abort_transaction(transaction, DeadlockCycleAbortReason(collides_with__or__deadlock_cycle))
             assert not self._locks_manager.is_deadlock()
             return None  # failed
         elif got_lock == 'WAIT':
@@ -166,7 +198,6 @@ class ROMVScheduler(SchedulerInterface):
             return None  # failed
 
         assert got_lock == 'GOT_LOCK'
-        # FIXME: is this "local-storing" mechanism ok?
         value = transaction.local_read(variable)
         if value is not None:
             return value
@@ -174,12 +205,14 @@ class ROMVScheduler(SchedulerInterface):
         assert value is not None
         return value
 
-    # TODO: doc!
+    # Called by `try_read(..)` or `try_write(..)`.
+    # Notice: Keep in mind that it has been called while iterating over the transactions
+    # from inside of the `run(..)` method (of this class).
     def abort_transaction(self, transaction: Transaction, reason):
         assert not transaction.is_read_only
         assert isinstance(transaction, UMVTransaction)
         self._locks_manager.release_all_locks(transaction.transaction_id)
-        self.mark_transaction_to_remove(transaction)  # TODO: is it ok?
+        self.mark_transaction_to_remove(transaction)
         # Notice: The call to `transaction.abort(..)` invokes the user-callback that might
         # add a new transaction with the same transaction id as of the aborted transaction.
         # It is ok because we already marked the aborted transaction to remove, and by side
@@ -189,13 +222,14 @@ class ROMVScheduler(SchedulerInterface):
         # list sorted by transaction_id. So that the iteration in `run(..)` won't encounter
         # this transaction again until next loop (in RR scheduling scheme).
         transaction.abort(self, reason)
-        # TODO: Undo the transaction. We currently storing the updates locally on the transaction itself only.
+        # Notice: We currently storing the updates locally on the transaction itself only.
+        #         If we choose to write to disk, we'll have to undo the transaction here.
 
-    # TODO: re-doc!
     # For the GC mechanism, when a read-only transaction commits, we need to find the
-    # responsibility time-span of the just-committed reader. This time-span starts
-    # when the youngest older reader was born.
+    # youngest older reader of the just-committed reader, in order to check whether
+    # someone may need the versions that the just-committed reader is responsible for.
     # This method helps us finding this read-only transaction.
+    # For more details, see under the implementation of the `MultiVersionGC`.
     def get_ongoing_read_only_transaction_older_than(self, ro_transaction: ROMVTransaction):
         assert ro_transaction.is_read_only and isinstance(ro_transaction, ROMVTransaction)
         assert ro_transaction.ro_transactions_sorted_by_timestamp_list_node is not None
@@ -208,7 +242,11 @@ class ROMVScheduler(SchedulerInterface):
         assert current_node is None or current_node.data.has_timestamp
         return None if current_node is None else current_node.data
 
-    # TODO: doc
+    # For the GC mechanism, when an update transaction commits, we need to find the
+    # youngest older reader of that updater, in order to check whether someone may
+    # need the previous version of the same variable that the just-committed updater
+    # committed. This method helps us finding this read-only transaction.
+    # For more details, see under the implementation of the `MultiVersionGC`.
     def get_ongoing_youngest_read_only_transaction(self):
         for ro_transaction in reversed(self._ongoing_ro_transactions_sorted_by_timestamp):
             if not ro_transaction.is_finished:
@@ -219,7 +257,8 @@ class ROMVScheduler(SchedulerInterface):
 
     # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
-        # TODO: if we use inner disk storage of a write transaction - do not do this!
+        # Notice: We currently storing the updates locally on the transaction itself only.
+        #         If we choose to write to disk, the below operations are not relevant.
         variables = copy.deepcopy(dict(self._mv_data_manager.get_variables()))
         for transaction in self._ongoing_transactions_by_tid:
             if isinstance(transaction, ROMVTransaction):

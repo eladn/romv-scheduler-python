@@ -122,6 +122,9 @@ class SchedulerInterface(ABC):
                 self._ongoing_transactions_mapping[transaction_to_remove.transaction_id] is transaction_to_remove:
             self._ongoing_transactions_mapping.pop(transaction_to_remove.transaction_id)
 
+        # Tell the inheritor scheduler that the transaction had been removed.
+        self.on_transaction_removed(transaction_to_remove)
+
     def get_transaction_by_id(self, transaction_id):
         if transaction_id in self._ongoing_transactions_mapping:
             return self._ongoing_transactions_mapping[transaction_id]
@@ -249,6 +252,13 @@ class SchedulerInterface(ABC):
     # each time a transaction is added.
     @abstractmethod
     def on_add_transaction(self, transaction: Transaction):
+        pass  # default implementation - do nothing
+
+    # Called by the scheduler each time the method `remove_transaction()` is called.
+    # Might be overridden by the inheritor scheduler, if it has to do something
+    # each time a transaction is removed.
+    @abstractmethod
+    def on_transaction_removed(self, transaction: Transaction):
         pass  # default implementation - do nothing
 
     # Called by the user. Perform transactions until no transactions left.

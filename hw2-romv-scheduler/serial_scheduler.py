@@ -29,6 +29,9 @@ class SerialScheduler(SchedulerInterface):
     def on_add_transaction(self, transaction: Transaction):
         pass  # We actually have nothing else to do here.
 
+    def on_transaction_removed(self, transaction: Transaction):
+        pass  # We actually have nothing else to do here.
+
     def run(self, forced_run_order=None):
         for transaction in self.iterate_over_ongoing_transactions_and_safely_remove_marked_to_remove_transactions(
                 forced_run_order):
