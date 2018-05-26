@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from doubly_linked_list import DoublyLinkedList
 from transaction import Transaction
+from itertools import chain
 
 
 # This is a pure-abstract class. It is inherited later by the `ROMVScheduler` and the `SerialScheduler`.
@@ -177,6 +178,37 @@ class SchedulerInterface(ABC):
 
     def get_serialization_order(self):
         return iter(self._serialization_order)
+
+    class NotEqualException(ValueError):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def compare_results(*schedulers):
+        assert all(isinstance(scheduler, SchedulerInterface) for scheduler in schedulers)
+        assert len(schedulers) > 1
+
+        all_values_of_all_schedulers = list(dict(scheduler.get_variables()) for scheduler in schedulers)
+
+        variable_names_per_scheduler = list(set(item[0] for item in variables_of_scheduler)
+                                            for variables_of_scheduler in all_values_of_all_schedulers)
+        varialbes_names_union = set(chain(*variable_names_per_scheduler))
+
+        if not all(varialbes_names_union == variable_names_of_scheduler
+                   for variable_names_of_scheduler in variable_names_per_scheduler):
+            raise SchedulerInterface.NotEqualException(
+                'Not all schedulers have the same variable names.')
+
+        # Verify that for each variable, all of the schedulers have the same value for that variable.
+        for variable_name in variable_names_per_scheduler[0]:
+            values = set(variables_of_scheduler[variable_name][-1][0]  # take the value of the last version
+                         if isinstance(variables_of_scheduler[variable_name], list)
+                         else variables_of_scheduler[variable_name]
+                         for variables_of_scheduler
+                         in all_values_of_all_schedulers)
+            if len(values) != 1:
+                raise SchedulerInterface.NotEqualException(
+                    'Not all schedulers have the same values of variable {variable}.'.format(variable=variable_name))
 
     # Called by the scheduler each time the method `add_transaction()` is called.
     # Might be overridden by the inheritor scheduler, if it has to do something

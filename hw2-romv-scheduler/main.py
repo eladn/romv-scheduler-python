@@ -176,10 +176,11 @@ def run_scheduling_test(scheduling_type, test_file_path):
         run_workload_simulator_on_scheduler(simple_serial_simulator, simple_serial_scheduler, test_str_len,
                                             forced_run_order=romv_rr_serialization_order)
 
-        # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
-
-        # Compare the local variables of all of the operations of all of the transaction of the 3 operation simulators!
+        # Compare the local variables of all of the operations of all of the transaction of the 3 operation simulators.
         TransactionsWorkloadSimulator.compare_runs(romv_rr_simulator, romv_serial_simulator, simple_serial_simulator)
+
+        # Compare results (variables) of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`.
+        SchedulerInterface.compare_results(romv_rr_scheduler, romv_serial_scheduler, simple_serial_scheduler)
 
     # Print two blank lines to indicate the end of each test.
     Logger().prefix = ''
