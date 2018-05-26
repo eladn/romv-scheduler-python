@@ -2,18 +2,24 @@ from timestamps_manager import Timestamp
 from operation import Operation
 
 
-# Transaction is the API between the scheduler and the user.
+# Transaction is the main API between the scheduler and the user.
 # It allows the user to add operations to it, using `add_operation(..)` method.
 # The scheduler calls the method `try_perform_next_operation(..)` when it decides to.
 # When the scheduler calls this method, the transaction tells the next operation to
 # try perform itself, using the method `next_operation.try_perform(..)`.
-# It the next operation successfully performed itself, the transaction would remove
+# If the next operation successfully performed itself, the transaction would remove
 # this operation from the `_waiting_operations_queue`.
 # After each time the scheduler tries to execute the next operation (using the above
 # mentioned method), a users' callback is called. If the operation has been successfully
 # completed, the callback `on_operation_complete_callback(..)` is called.
 # Otherwise, the callback `on_operation_failed_callback(..)` is called.
-# These users' callbacks are set on the transaction creation.
+# When `try_perform_next_operation(..)` is called (by the scheduler) but the queue
+# `_waiting_operations_queue` is empty, the scheduler calls to the user callback
+# `_ask_user_for_next_operation_callback(..)`. It gives the user an opportunity to add
+# the next operation for that transaction. However, the user does not have to do so.
+# The user can also take advantage of the callback `on_operation_complete_callback(..)`
+# in order to add the next operation to be performed.
+# All of these mentioned users' callbacks are set on the transaction creation.
 class Transaction:
     def __init__(self, transaction_id, is_read_only: bool=False,
                  on_operation_complete_callback=None,
@@ -47,6 +53,7 @@ class Transaction:
         # When a transaction tries to perform its operation, and the scheduler cannot acquire locks
         # because of other transactions, it assigns to this public field the set of transactions
         # that the current transaction is waiting for. It is used later in the run-log printings.
+        # The user can access this field later.
         self.waits_for = None
 
     @property
@@ -102,39 +109,59 @@ class Transaction:
     def try_perform_next_operation(self, scheduler):
         assert len(self._waiting_operations_queue) > 0
 
+        # Reset the "wait_for" field. It might be set by the scheduler if the operation
+        # would fail to perform because it waits for another operation. In that case
+        # the scheduler would assign to this field a set of transaction we wait for.
         self.waits_for = None
 
         next_operation = self._waiting_operations_queue[0]
         next_operation.try_perform(scheduler)
 
+        # The scheduler might abort the transaction when `scheduler.try_write(..)`
+        # calls `scheduler.try_write(..)` or `scheduler.try_read(..)`.
+        # In that case, `scheduler.try_write(..)` would return and we would each here.
+        # We should just return. The caller scheduler would continue handle this case.
         if self.is_aborted:
-            # TODO: what to do here?
             return next_operation
 
+        # The call to `next_operation.try_perform(..)` has failed, bacauuse it
+        # called one of `scheduler.try_write(..)` or `scheduler.try_read(..)`,
+        # and this inner call has been failed (for example: couldn't acquire lock).
         if not next_operation.is_completed:
-            self._on_operation_failed_callback(self, scheduler, next_operation)
+            if self._on_operation_failed_callback:
+                self._on_operation_failed_callback(self, scheduler, next_operation)
             return next_operation
 
+        # The operation has been completed. Remove it from the waiting queue.
         queue_head = self._waiting_operations_queue.pop(0)  # remove the list head
         assert queue_head == next_operation
+
         if next_operation.get_type() == 'commit':
             self._is_completed = True
         if self._on_operation_complete_callback:
             # The user callback might now add the next operation.
             self._on_operation_complete_callback(self, scheduler, next_operation)
+
         return next_operation
 
-    # called by the scheduler after removing this transaction from it's transactions list.
+    # Called by the scheduler when it decides to abort this transaction.
+    # Notice: Called by the scheduler after removing this transaction from it's transactions list.
+    # It might be called in the following trace:
+    #   transaction.try_perform_next_operation(..)
+    #   next_operation.try_perform(..)
+    #   scheduler.try_write(..)
+    #   transaction.abort(..)
     def abort(self, scheduler, reason):
         assert not self._is_aborted and not self._is_completed
         assert self._transaction_id is not None
         assert scheduler.get_transaction_by_id(self._transaction_id) is None
         self._is_aborted = True
-        # TODO: what else should be done here?
+        # Call the user callback.
         if self._on_transaction_aborted_callback:
             self._on_transaction_aborted_callback(self, scheduler, reason)
 
+    # Called by the user.
     def add_operation(self, operation: Operation):
         assert not self._is_read_only or operation.get_type() != 'write'
-        self._waiting_operations_queue.append(operation)  # FIXME: verify append adds in the end?
+        self._waiting_operations_queue.append(operation)
         operation.transaction_id = self.transaction_id

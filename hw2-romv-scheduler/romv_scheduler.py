@@ -1,6 +1,6 @@
 from scheduler_interface import SchedulerInterface
 from transaction import Transaction
-from timestamps_manager import Timestamp, TimestampsManager
+from timestamps_manager import TimestampsManager
 from romv_transaction import ROMVTransaction, UMVTransaction
 from locks_manager import LocksManager
 from multi_version_data_manager import MultiVersionDataManager

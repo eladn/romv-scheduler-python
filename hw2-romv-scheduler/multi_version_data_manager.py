@@ -1,15 +1,17 @@
 from collections import namedtuple, defaultdict
-from timestamps_manager import Timestamp, Timespan
+from timestamps_manager import Timestamp
 from doubly_linked_list import DoublyLinkedList
 
 
 # The class is responsible for managing the versions of values of the variables in the system.
+# We make sure to explicitly denote when we access the disk.
 class MultiVersionDataManager:
     Version = namedtuple('Version', ['value', 'ts'])
 
+    # This class simulates the disk structure and the API with the disk.
     class Disk:
         def __init__(self):
-            # a dictionary - for each variable we map a Version (consisted by value and ts).
+            # a dictionary - for each variable we map a list of `Version`s (each consisted of a value and a ts).
             self.mapping_from_variable_to_versions_list = defaultdict(DoublyLinkedList)
 
         def access_versions_list_for_variable(self, variable_name):
@@ -29,10 +31,14 @@ class MultiVersionDataManager:
             return None
 
     def __init__(self):
+        # The disk contains the version list for each variable.
         self._disk = MultiVersionDataManager.Disk()
 
-        # Local RAM cache saves the latest version ts for each variable.
+        # Local RAM cache saves the latest version timestamp for each variable.
         # Maps variable name to the latest committed ts for this value.
+        # For making the method `get_latest_version_number()` avoid accessing the disk.
+        # Note that we never evict from this cache. But we do accessing the disk on misses,
+        # so eviction is possible to implement here.
         self._cache_mapping_from_variable_to_its_lastest_ts = dict()
 
     # Returns the latest value before the given `max_ts` timestamp.
@@ -50,12 +56,16 @@ class MultiVersionDataManager:
         new_version = MultiVersionDataManager.Version(value=new_value, ts=new_ts)
         assert len(self._disk.access_versions_list_for_variable(variable)) == 0\
                or self._disk.access_versions_list_for_variable(variable).peek_back().ts < new_ts
+
+        # Perform a write to disk (add the new version).
         self._disk.access_versions_list_for_variable(variable).push_back(new_version)
-        # update the latest ts in the local cache at RAM.
+
+        # update the latest ts for the just-updated-variable in the local cache at RAM.
         self._cache_mapping_from_variable_to_its_lastest_ts[variable] = new_ts
 
-    # Returns the ts of the latest version.
+    # Returns the ts of the latest version for a given variable.
     # Returns `None` if there wasn't any write to this variable yet.
+    # This operation is assumed to be fast because potentially no disk access is needed.
     def get_latest_version_number(self, variable):
         # Firstly lets take a look in the local cache (at RAM).
         if variable in self._cache_mapping_from_variable_to_its_lastest_ts:
@@ -83,11 +93,11 @@ class MultiVersionDataManager:
     # This method is used by the GC eventual eviction mechanism.
     # Removes the version of the given variable with the given ts.
     def delete_old_version(self, variable_to_remove, timestamp_to_remove: Timestamp):
-        print('delete_old_version: ', variable_to_remove, timestamp_to_remove)
         version_node = self._disk.find_node_of_certain_version(variable_to_remove, timestamp_to_remove)
-        assert version_node is not None
-        assert version_node.next_node is not None
+        assert version_node is not None  # We assume the given version exists.
+        assert version_node.next_node is not None  # We assume this was not the last version for that variable.
         self._disk.access_versions_list_for_variable(variable_to_remove).remove_node(version_node)
+        # We assume this was not the last version for that variable.
         assert len(self._disk.access_versions_list_for_variable(variable_to_remove)) > 0
 
     # Used for printing all of the variables to the run-log for debugging purposes.

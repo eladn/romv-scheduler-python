@@ -3,7 +3,7 @@ from deadlock_detector import DeadlockDetector
 
 
 class LocksManager:
-    # TransactionLocksSet = namedtuple('TransactionLocksSet', ['read_locks', 'write_locks'])
+
     class TransactionLocksSet:
         def __init__(self):
             self.read_locks = set()
@@ -12,17 +12,21 @@ class LocksManager:
     def __init__(self):
         self._deadlock_detector = DeadlockDetector()
 
-        # locks table fields (read locks multiset + write locks set)
-        # our multiset would be a dict ! for each key will count the amount of its duplications.
-        # dict : key - transaction id, value - tuple(read,write)
-        self._transactions_locks_sets = defaultdict(LocksManager.TransactionLocksSet)  # { transaction_id: TransactionLocksSet }
-        # the read locks table : the key is the variable to lock
-        #                        the value is a set of who locks it at the moment
+        # Mapping from transaction-id to the locked variables this transaction holds.
+        # { transaction_id: TransactionLocksSet }.
+        self._transactions_locks_sets = defaultdict(LocksManager.TransactionLocksSet)
+
+        # Mapping from variable to a set of transactions that
+        # hold a read lock for this variable.
         self._read_locks_table = defaultdict(set)
-        # the write locks table : the key is the variable to lock
-        #                         the value is what transaction currently locks the variable
+
+        # Mapping from variable to the transaction-id of the (single)
+        # transaction that holds a write lock for this variable.
         self._write_locks_table = dict()
 
+    # Returns a set of transaction-ids of the transactions that hold locks
+    # that collide with the given requested lock (variable, read_or_write).
+    # If no such, returns None.
     def _collides_with(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
         if variable in self._write_locks_table:
@@ -38,12 +42,17 @@ class LocksManager:
         return None
 
     # Returns:
-    #   "GOT_LOCK" the lock has been acquired successfully (or the transaction also has the lock).
-    #   "WAIT" is the lock could not be acquired now (someone else is holding it, but there is no dependency cycle).
+    #   "GOT_LOCK" the lock has been acquired successfully (or the transaction already holds the lock).
+    #   "WAIT" is the lock could not be acquired now (someone else is holding it), but there is no dependency cycle.
     #   "DEADLOCK" if a deadlock will be created if the transaction would wait for this wanted lock.
     def try_acquire_lock(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
+
+        # Get the set of transaction-ids of the transactions that hold locks that collide
+        # with the requested lock (variable, read_or_write).
         collides_with = self._collides_with(transaction_id, variable, read_or_write)
+
+        # `collides_with` is None iff the lock can be acquired now.
         if collides_with is None:
             if read_or_write == 'read':
                 self._read_locks_table[variable].add(transaction_id)
@@ -53,6 +62,9 @@ class LocksManager:
                 self._write_locks_table[variable] = transaction_id
                 self._transactions_locks_sets[transaction_id].write_locks.add(variable)
             return 'GOT_LOCK', None
+
+        # The lock cannot be acquired now. Lets chech whether waiting for it would
+        # result in a deadlock.
         assert isinstance(collides_with, set) and len(collides_with) > 0
         for wait_for_tid in collides_with:
             deadlock_cycle_detected = self._deadlock_detector.wait_for(transaction_id, wait_for_tid)
@@ -60,7 +72,7 @@ class LocksManager:
                 return 'DEADLOCK', deadlock_cycle_detected
         return 'WAIT', collides_with
 
-    # when transaction_id is done, we release all of its acquired locks and remove it from the "wait-for" graph.
+    # When a transaction is done, we release all of its acquired locks and remove it from the "wait-for" graph.
     def release_all_locks(self, transaction_id):
         # remove the just-ended-transaction from the "wait-for" graph.
         self._deadlock_detector.transaction_ended(transaction_id)
@@ -80,6 +92,6 @@ class LocksManager:
 
         self._transactions_locks_sets.pop(transaction_id)
 
-    # returns if there is a deadlock at the moment
+    # Returns whether there is a deadlock at the moment
     def is_deadlock(self):
         return self._deadlock_detector.find_deadlock_cycle() is not None

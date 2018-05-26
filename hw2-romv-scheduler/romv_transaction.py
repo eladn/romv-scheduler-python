@@ -28,7 +28,10 @@ class UMVTransaction(SchedulerInterface.UTransaction):
     def __init__(self, *args, **kwargs):
         kwargs['is_read_only'] = False
         super().__init__(*args, **kwargs)
+
+        # TODO: doc!
         self._local_written_values = dict()  # TODO: is it ok to store them on memory only?
+
         # For each variable that the transaction updates, we store the previous version
         # of that variable. This data is needed for the GC mechanism. In order to know
         # which versions to evict, in a case where there is no reader that is "responsible"
