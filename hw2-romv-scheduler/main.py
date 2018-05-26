@@ -30,7 +30,7 @@ from utils import add_feature_to_parser
 
 
 TESTS_DIR = 'tests'
-# DEFAULT_TEST_FILENAME = 'transactions.dat'
+DEFAULT_TEST_FILENAME = 'transactions.dat'
 FORCED_SCHEDULING_TYPES = ['by-test', 'romv-rr', 'romv-serial', 'simple-serial', 'compare-all']
 
 
@@ -55,8 +55,10 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
 """)
     parser.add_argument('--tests', '--test', '-t',
                         type=str, nargs='+', required=False,
-                        help='Test file-names to use.')
+                        help='Test file-names to use. If not given, the driver would use the file `{filename}` in the working directory if such a file exists. Otherwise, it will run all the test in the folder `tests/`.'.format(
+                            filename=DEFAULT_TEST_FILENAME, tests_dir=TESTS_DIR))
 
+    # Add logging options.
     add_feature_to_parser(parser, ['--log-variables', '-lv'], default=False,
                           help='Verbose mode. Use in order to print the variables values after each change.')
     add_feature_to_parser(parser, ['--log-locks', '-ll'], default=True,
@@ -239,12 +241,13 @@ if __name__ == '__main__':
     # If the tests to run had been explicitly mentioned as an argument, use it.
     # Otherwise, run all of the test files under the `test/` directory.
     test_files = args.tests
+    if not test_files and os.path.isfile(DEFAULT_TEST_FILENAME):
+        test_files = [DEFAULT_TEST_FILENAME]
     if not test_files:
         test_files = [os.path.join(TESTS_DIR, filename)
                       for filename in os.listdir(TESTS_DIR)
                       if os.path.isfile(os.path.join(TESTS_DIR, filename))]
-    else:
-        assert isinstance(args.tests, list)
+    assert isinstance(test_files, list)
 
     # Run the tests one-by-one.
     for test_file_path in test_files:

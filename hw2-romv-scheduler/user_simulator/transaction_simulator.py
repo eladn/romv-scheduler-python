@@ -21,8 +21,10 @@ class SchedulerExecutionLogger:
     def transaction_action(transaction_simulator, operation_simulator):
         full_state = (' ' + transaction_simulator.to_full_state_str()
                       if Logger().is_log_type_set_on('transaction_state') else '')
-        action_no = 'action ' + (str(operation_simulator.operation_number).ljust(2)) \
-            if not Logger().is_log_type_set_on('transaction_state') else ''
+        action_no = str(operation_simulator.operation_number)
+        if not Logger().is_log_type_set_on('oded_style'):
+            action_no = action_no.ljust(2)
+        action_no = 'action ' + action_no if not Logger().is_log_type_set_on('transaction_state') else ''
         is_waiting = (operation_simulator.operation is not None and not operation_simulator.operation.is_completed)
         wait_str = 'WAIT' if Logger().is_log_type_set_on('transaction_state') else ' WAITING'
         Logger().log("{trans} {action_no}{waiting}{full_state}".format(
