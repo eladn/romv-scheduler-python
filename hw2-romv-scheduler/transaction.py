@@ -39,15 +39,10 @@ class Transaction:
 
         # Transactions are stored in a list, stored by transaction id, so that the scheduler can
         # iterate over the transactions by the order of their transaction id.
-        # Besides the above mentioned list, there are also 3 other lists sorted by arrival time:
-        #   (1) all transactions list ; (2) read-only transactions list ; (3) update transactions list.
-        # Each transaction stores a pointer to its own node in each list, so that given a transaction
-        # we could find efficiently the next & previous transactions in each list the transaction
+        # Each transaction stores a pointer to its own node in the list, so that given a transaction
+        # we could find efficiently the next & previous transactions in the list the transaction
         # belongs to.
         self.transactions_by_tid_list_node = None
-        self.transactions_by_arrival_list_node = None
-        self.ro_transactions_by_arrival_list_node = None
-        self.u_transactions_by_arrival_list_node = None
 
         # When a transaction tries to perform its operation, and the scheduler cannot acquire locks
         # because of other transactions, it assigns to this public field the set of transactions

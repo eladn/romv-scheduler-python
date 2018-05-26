@@ -40,13 +40,6 @@ class SchedulerInterface(ABC):
         # iterate over the transactions by the order of their transaction id.
         self._ongoing_transactions_by_tid = DoublyLinkedList()
 
-        # Besides the above mentioned list, there are also 3 other lists sorted by arrival time:
-        #   (1) all transactions list ; (2) read-only transactions list ; (3) update transactions list.
-        # These lists will be used for garbage-collection operations.
-        self._ongoing_transactions_by_arrival = DoublyLinkedList()
-        self._ongoing_ro_transactions_by_arrival = DoublyLinkedList()
-        self._ongoing_u_transactions_by_arrival = DoublyLinkedList()
-
         # During the main iteration over the transactions (inside of the `run()` method), the scheduler
         # might decide to remove a transaction (if it commits or aborts). However, it is not safe to
         # remove the transaction from the list while iterating over it. We solve this issue by only
@@ -83,17 +76,6 @@ class SchedulerInterface(ABC):
         node = self._ongoing_transactions_by_tid.insert_after_node(transaction, insert_after_transaction_node)
         transaction.transactions_by_tid_list_node = node
 
-        # Add the transaction to the end of the transactions list sorted by arrival.
-        node = self._ongoing_transactions_by_arrival.push_back(transaction)
-        transaction.transactions_by_arrival_list_node = node
-
-        if transaction.is_read_only:
-            node = self._ongoing_ro_transactions_by_arrival.push_back(transaction)
-            transaction.ro_transactions_by_arrival_list_node = node
-        else:
-            node = self._ongoing_u_transactions_by_arrival.push_back(transaction)
-            transaction.u_transactions_by_arrival_list_node = node
-
         # Add the new transaction to the mapping by transaction-id.
         self._ongoing_transactions_mapping[transaction.transaction_id] = transaction
 
@@ -117,11 +99,7 @@ class SchedulerInterface(ABC):
     # TODO: doc!
     def remove_transaction(self, transaction_to_remove: Transaction):
         self._ongoing_transactions_by_tid.remove_node(transaction_to_remove.transactions_by_tid_list_node)
-        self._ongoing_transactions_by_arrival.remove_node(transaction_to_remove.transactions_by_arrival_list_node)
-        if transaction_to_remove.is_read_only:
-            self._ongoing_ro_transactions_by_arrival.remove_node(transaction_to_remove.ro_transactions_by_arrival_list_node)
-        else:
-            self._ongoing_u_transactions_by_arrival.remove_node(transaction_to_remove.u_transactions_by_arrival_list_node)
+
         # TODO: doc the following check.
         if transaction_to_remove.transaction_id in self._ongoing_transactions_mapping and \
                 self._ongoing_transactions_mapping[transaction_to_remove.transaction_id] is transaction_to_remove:

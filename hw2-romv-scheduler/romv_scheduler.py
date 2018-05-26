@@ -6,6 +6,7 @@ from locks_manager import LocksManager
 from multi_version_data_manager import MultiVersionDataManager
 from multi_version_gc import MultiVersionGC
 from logger import Logger
+from doubly_linked_list import DoublyLinkedList
 import copy  # for deep-coping the disk in order to add the yet-committed variables so they could be printed to run-log.
 
 
@@ -33,6 +34,10 @@ class ROMVScheduler(SchedulerInterface):
         self._mv_data_manager = MultiVersionDataManager()
         self._mv_gc = MultiVersionGC()
         self._timestamps_manager = TimestampsManager()
+
+        # TODO: doc!
+        # This list is used by the garbage-collection mechanism.
+        self._ongoing_ro_transactions_sorted_by_timestamp = DoublyLinkedList()
 
     @property
     def mv_data_manager(self):
@@ -97,6 +102,10 @@ class ROMVScheduler(SchedulerInterface):
     def assign_timestamp_to_transaction(self, transaction: Transaction):
         transaction.timestamp = self._timestamps_manager.get_next_ts()
         self.serialization_point(transaction.transaction_id)
+        if isinstance(transaction, ROMVTransaction):
+            # TODO: doc!
+            node = self._ongoing_ro_transactions_sorted_by_timestamp.push_back(transaction)
+            transaction.ro_transactions_sorted_by_timestamp_list_node = node
 
     # TODO: doc!
     def try_write(self, transaction_id, variable, value):
@@ -131,7 +140,9 @@ class ROMVScheduler(SchedulerInterface):
         assert transaction is not None
         if transaction.is_read_only:
             assert isinstance(transaction, ROMVTransaction)
-            return self._mv_data_manager.read_older_version_than(variable, transaction.timestamp)
+            value = self._mv_data_manager.read_older_version_than(variable, transaction.timestamp)
+            assert value is not None
+            return value
 
         assert isinstance(transaction, UMVTransaction)
         got_lock, collides_with__or__deadlock_cycle = self._locks_manager.try_acquire_lock(transaction_id, variable, 'read')
@@ -154,7 +165,9 @@ class ROMVScheduler(SchedulerInterface):
         value = transaction.local_read(variable)
         if value is not None:
             return value
-        return self._mv_data_manager.read_latest_version(variable)
+        value = self._mv_data_manager.read_latest_version(variable)
+        assert value is not None
+        return value
 
     # TODO: doc!
     def abort_transaction(self, transaction: Transaction, reason):
@@ -173,57 +186,44 @@ class ROMVScheduler(SchedulerInterface):
         transaction.abort(self, reason)
         # TODO: Undo the transaction. We currently storing the updates locally on the transaction itself only.
 
-    # For the GC mechanism, when a read-only transaction commits, we need to find the
-    # intersection of variables that the just-committed reader is responsible for, with
-    # the variables that the oldest younger read-only transaction is responsible for.
-    # This method helps us finding this read-only transaction.
-    def get_read_transaction_younger_than(self, transaction: Transaction):
-        if transaction.is_read_only:
-            current_node = transaction.ro_transactions_by_arrival_list_node.next_node
-        else:
-            current_node = transaction.transactions_by_arrival_list_node.next_node
-        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished
-                                            or not current_node.data.has_timestamp):
-            current_node = current_node.next_node
-        return None if current_node is None else current_node.data
-
+    # TODO: re-doc!
     # For the GC mechanism, when a read-only transaction commits, we need to find the
     # responsibility time-span of the just-committed reader. This time-span starts
     # when the youngest older reader was born.
     # This method helps us finding this read-only transaction.
-    def get_read_transaction_older_than(self, transaction: Transaction):
-        if transaction.is_read_only:
-            current_node = transaction.ro_transactions_by_arrival_list_node.prev_node
-        else:
-            current_node = transaction.transactions_by_arrival_list_node.prev_node
-        while current_node is not None and (not current_node.data.is_read_only or current_node.data.is_finished
-                                            or not current_node.data.has_timestamp):
+    def get_ongoing_read_only_transaction_older_than(self, ro_transaction: ROMVTransaction):
+        assert ro_transaction.is_read_only and isinstance(ro_transaction, ROMVTransaction)
+        assert ro_transaction.ro_transactions_sorted_by_timestamp_list_node is not None
+        current_node = ro_transaction.ro_transactions_sorted_by_timestamp_list_node.prev_node
+        while current_node is not None and current_node.data.is_finished:
+            assert current_node.data.is_read_only
+            assert current_node.data.has_timestamp
             current_node = current_node.prev_node
+        assert current_node is None or current_node.data.is_read_only
+        assert current_node is None or current_node.data.has_timestamp
         return None if current_node is None else current_node.data
 
-    # For the GC mechanism, when an updater transaction commits, we need to decide
-    # whether to evict the previous version of the updated variables. If there exists
-    # a read-only transaction that is responsible for the previous version, we should
-    # do nothing there. But it there is no such reader, the update transaction should
-    # mark the previous version for eviction.
-    # This method helps us finding whether this read-only transaction exists.
-    def are_there_read_transactions_after_ts_and_before_transaction(self, after_ts: Timestamp, before_transaction: Transaction):
-        reader = self.get_read_transaction_younger_than(before_transaction)
-        if reader is None:
-            return False
-        return reader.timestamp > after_ts  # FIXME: should be `>=` inequality or just `>`?
+    # TODO: doc
+    def get_ongoing_youngest_read_only_transaction(self):
+        for ro_transaction in reversed(self._ongoing_ro_transactions_sorted_by_timestamp):
+            if not ro_transaction.is_finished:
+                assert ro_transaction.is_read_only
+                assert ro_transaction.has_timestamp
+                return ro_transaction
+        return None
 
     # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
         # TODO: if we use inner disk storage of a write transaction - do not do this!
         variables = copy.deepcopy(dict(self._mv_data_manager.get_variables()))
-        for transaction in self._ongoing_u_transactions_by_arrival:
+        for transaction in self._ongoing_transactions_by_tid:
+            if isinstance(transaction, ROMVTransaction):
+                continue
             assert isinstance(transaction, UMVTransaction)
-            if transaction.is_aborted:
+            if transaction.is_aborted or transaction.is_completed:  # TODO: check if it is ok.
                 continue
             for var, new_uncommitted_version in transaction._local_written_values.items():
                 if var not in variables:
                     variables[var] = []
                 variables[var].append((new_uncommitted_version, 'uncommitted'))
         return variables.items()
-

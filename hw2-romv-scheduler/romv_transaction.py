@@ -1,4 +1,3 @@
-from no_false_negative_variables_set import NoFalseNegativeVariablesSet
 from scheduler_interface import SchedulerInterface
 from multi_version_data_manager import MultiVersionDataManager
 
@@ -7,21 +6,32 @@ class ROMVTransaction(SchedulerInterface.ROTransaction):
     def __init__(self, *args, **kargs):
         kargs['is_read_only'] = True
         super().__init__(*args, **kargs)
+
+        # For new GC:
+        # TODO: doc!
+        self.old_versions_under_my_responsibility = set()
+
+        # TODO: doc!
+        self.ro_transactions_sorted_by_timestamp_list_node = None
+
+        # XXXXXXXXXXXXXXXXXXXX  DEPRECATED! OLD GC (not used)  XXXXXXXXXXXXXXXXXXXX
         # Each ongoing read-only transaction holds a set of variables that has been committed
         # (by an update transaction) before that reader has born, but after the youngest older
         # reader has been born. So that, in each interval of time between the birth of each pair
         # of consecutive read-only transactions, the youngest one holds a set of all the variables
         # that has been committed in that interval of time. This makes that reader "responsible"
         # for these versions in some sense. More about it in the GC mechanism explanation.
-        self._committed_variables_set_since_last_reader_born = NoFalseNegativeVariablesSet()
+        self._committed_variables_set_since_last_reader_born = None
 
+    # XXXXXXXXXXXXXXXXXXXX  DEPRECATED! OLD GC (not used)  XXXXXXXXXXXXXXXXXXXX
     @property
     def committed_variables_set_since_last_reader_born(self):
         return self._committed_variables_set_since_last_reader_born
 
+    # XXXXXXXXXXXXXXXXXXXX  DEPRECATED! OLD GC (not used)  XXXXXXXXXXXXXXXXXXXX
     @committed_variables_set_since_last_reader_born.setter
     def committed_variables_set_since_last_reader_born(self, new_set):
-        assert isinstance(new_set, NoFalseNegativeVariablesSet)
+        assert new_set is not None
         self._committed_variables_set_since_last_reader_born = new_set
 
 
