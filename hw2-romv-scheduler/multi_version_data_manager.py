@@ -1,5 +1,6 @@
 from collections import namedtuple, defaultdict
 from timestamps_manager import Timestamp, Timespan
+from doubly_linked_list import DoublyLinkedList
 
 
 # The class is responsible for managing the versions of values of the variables in the system.
@@ -9,13 +10,23 @@ class MultiVersionDataManager:
     class Disk:
         def __init__(self):
             # a dictionary - for each variable we map a Version (consisted by value and ts).
-            self.mapping_from_variable_to_versions_list = defaultdict(list)
+            self.mapping_from_variable_to_versions_list = defaultdict(DoublyLinkedList)
 
         def access_versions_list_for_variable(self, variable_name):
             return self.mapping_from_variable_to_versions_list[variable_name]
 
         def is_variable_stored_on_disk(self, variable_name):
             return variable_name in self.mapping_from_variable_to_versions_list
+
+        def find_node_of_certain_version(self, variable, ts: Timestamp):
+            if not self.is_variable_stored_on_disk(variable):
+                return None
+            for version_node in self.access_versions_list_for_variable(variable).iter_over_nodes():
+                version = version_node.data
+                if version.ts != ts:
+                    continue
+                return version_node
+            return None
 
     def __init__(self):
         self._disk = MultiVersionDataManager.Disk()
@@ -38,8 +49,8 @@ class MultiVersionDataManager:
     def write_new_version(self, variable, new_value, new_ts: Timestamp):
         new_version = MultiVersionDataManager.Version(value=new_value, ts=new_ts)
         assert len(self._disk.access_versions_list_for_variable(variable)) == 0\
-               or self._disk.access_versions_list_for_variable(variable)[-1].ts < new_ts
-        self._disk.access_versions_list_for_variable(variable).append(new_version)
+               or self._disk.access_versions_list_for_variable(variable).peek_back().ts < new_ts
+        self._disk.access_versions_list_for_variable(variable).push_back(new_version)
         # update the latest ts in the local cache at RAM.
         self._cache_mapping_from_variable_to_its_lastest_ts[variable] = new_ts
 
@@ -53,7 +64,8 @@ class MultiVersionDataManager:
         # Variable not found in RAM. Lets access the disk to search for it.
         if not self._disk.is_variable_stored_on_disk(variable):
             return None
-        latest_ts_from_disk = self._disk.access_versions_list_for_variable(variable)[-1].ts
+        assert len(self._disk.access_versions_list_for_variable(variable)) > 0
+        latest_ts_from_disk = self._disk.access_versions_list_for_variable(variable).peek_back().ts
 
         # Lets update the cache now.
         self._cache_mapping_from_variable_to_its_lastest_ts[variable] = latest_ts_from_disk
@@ -65,8 +77,18 @@ class MultiVersionDataManager:
         # Lets access the disk to search for it.
         if not self._disk.is_variable_stored_on_disk(variable):
             return None
-        return self._disk.access_versions_list_for_variable(variable)[-1].value
+        assert len(self._disk.access_versions_list_for_variable(variable)) > 0
+        return self._disk.access_versions_list_for_variable(variable).peek_back().value
 
+    def delete_old_version(self, variable_to_remove, timestamp_to_remove: Timestamp):
+        print('delete_old_version: ', variable_to_remove, timestamp_to_remove)
+        version_node = self._disk.find_node_of_certain_version(variable_to_remove, timestamp_to_remove)
+        assert version_node is not None
+        assert version_node.next_node is not None
+        self._disk.access_versions_list_for_variable(variable_to_remove).remove_node(version_node)
+        assert len(self._disk.access_versions_list_for_variable(variable_to_remove)) > 0
+
+    # XXXXXXXXXXXXXXXXXXXX  DEPRECATED! OLD GC (not used)  XXXXXXXXXXXXXXXXXXXX
     # This method is used by the GC eventual eviction mechanism.
     # Removes versions of the given variable that are inside of the given timespan
     # `remove_versions_in_timespan`, but do so only if the promised newer versions
@@ -87,20 +109,21 @@ class MultiVersionDataManager:
 
         flag_remove_found, flag_promised_found = False, False
         versions_to_remove = []  # marked versions to be remove
-        for version in reversed(self._disk.access_versions_list_for_variable(variable)):
+        for version_node in self._disk.access_versions_list_for_variable(variable).reversed_over_nodes():
+            version = version_node.data
             if remove_versions_in_timespan.from_ts >= version.ts >= remove_versions_in_timespan.to_ts:
                 flag_remove_found = True
                 if flag_promised_found:
-                    # Mark this version to remove. We cannot remove while iterating a python list.
+                    # Mark this version to remove. We cannot remove while iterating a list.
                     # In real-life case we would like to remove it during the iteration.
-                    versions_to_remove.append(version)
+                    versions_to_remove.append(version_node)
             if promised_newer_version_in_timespan.from_ts >= version.ts >= promised_newer_version_in_timespan.to_ts:
                 flag_promised_found = True
 
         # Actually remove the versioned marked to remove.
         # In real-life case we would like to remove it during the finding iteration.
-        for version_to_remove in versions_to_remove:
-            self._disk.access_versions_list_for_variable(variable).remove(version_to_remove)
+        for version_node_to_remove in versions_to_remove:
+            self._disk.access_versions_list_for_variable(variable).remove_node(version_node_to_remove)
 
         return flag_remove_found, flag_promised_found
 
