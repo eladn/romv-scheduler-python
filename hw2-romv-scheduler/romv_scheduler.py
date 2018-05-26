@@ -22,7 +22,7 @@ class DeadlockCycleAbortReason:
 # The `ROMVScheduler` inherits from the basic `SchedulerInterface` and implements the ROMV protocol.
 # It mainly implements the methods: `run(..)`, `try_read(..)`, and `try_write(..)`.
 # We use the `LocksManager` for managing locks over the variables (which uses the `DeadlockDetector`).
-# When the `SchedulerInterface` encounters a deadlock, it chooses a victim transaction and aborts it.
+# When the `ROMVScheduler` encounters a deadlock, it chooses a victim transaction and aborts it.
 # For simplicity, the chosen victim is the first that closed the deadlock-cycle.
 # The updates made during the update-transaction are stored inside of a local mapping inside of the
 # update transaction. Find additional details about it under `UMVTransaction` class in `romv_transaction.py`.

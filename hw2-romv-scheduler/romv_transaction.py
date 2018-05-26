@@ -35,7 +35,7 @@ class UMVTransaction(SchedulerInterface.UTransaction):
         # The reason that it is ok is because no other transaction in the system can
         # read these updated version until this update-transaction commits.
         # On commit, these updates are written as new versions in the disk.
-        # In a transaction updated a variable more than single time, only the final
+        # If a transaction updated a variable more than single time, only the final
         # version would be stored on the disk. Again, this is ok because the protocol
         # promises that no other transaction can access these intermediate updates.
         # When this update transaction performs a read, we first check whether this

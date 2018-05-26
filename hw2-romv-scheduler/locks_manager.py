@@ -1,5 +1,6 @@
 from collections import defaultdict
 from deadlock_detector import DeadlockDetector
+from logger import Logger
 
 
 class LocksManager:
@@ -55,12 +56,28 @@ class LocksManager:
         # `collides_with` is None iff the lock can be acquired now.
         if collides_with is None:
             if read_or_write == 'read':
+                # if the lock is already acquired - finish.
+                if transaction_id in self._read_locks_table[variable]:
+                    return 'GOT_LOCK', None
+
                 self._read_locks_table[variable].add(transaction_id)
                 self._transactions_locks_sets[transaction_id].read_locks.add(variable)
+
+                Logger().log('     Locks: Transaction {tid} acquired read lock for variable `{variable}`.'.format(
+                    tid=transaction_id, variable=variable), log_type_name='locks')
             else:
                 assert variable not in self._write_locks_table or self._write_locks_table[variable] == transaction_id
+
+                # if the lock is already acquired - finish.
+                if variable in self._write_locks_table:
+                    assert self._write_locks_table[variable] == transaction_id
+                    return 'GOT_LOCK', None
+
                 self._write_locks_table[variable] = transaction_id
                 self._transactions_locks_sets[transaction_id].write_locks.add(variable)
+
+                Logger().log('     Locks: Transaction {tid} acquired write lock for variable `{variable}`.'.format(
+                    tid=transaction_id, variable=variable), log_type_name='locks')
             return 'GOT_LOCK', None
 
         # The lock cannot be acquired now. Lets chech whether waiting for it would
@@ -89,6 +106,15 @@ class LocksManager:
             assert write_var in self._write_locks_table
             assert transaction_id == self._write_locks_table[write_var]
             self._write_locks_table.pop(write_var)
+
+        if len(self._transactions_locks_sets[transaction_id].read_locks) > 0:
+            Logger().log('     Locks: Transaction {tid} released read locks for variables `{variables}`.'.format(
+                tid=transaction_id,
+                variables=str(self._transactions_locks_sets[transaction_id].read_locks)), log_type_name='locks')
+        if len(self._transactions_locks_sets[transaction_id].write_locks) > 0:
+            Logger().log('     Locks: Transaction {tid} released write locks for variables `{variables}`.'.format(
+                tid=transaction_id,
+                variables=str(self._transactions_locks_sets[transaction_id].write_locks)), log_type_name='locks')
 
         self._transactions_locks_sets.pop(transaction_id)
 
