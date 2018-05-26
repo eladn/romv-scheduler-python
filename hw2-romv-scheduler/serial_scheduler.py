@@ -1,7 +1,8 @@
-from scheduler_base_modules import Scheduler, Transaction
+from scheduler_interface import SchedulerInterface
+from transaction import Transaction
 
 
-class SerialScheduler(Scheduler):
+class SerialScheduler(SchedulerInterface):
     def __init__(self):
         super().__init__(scheduling_scheme='serial')
         self._variables_latest_values = dict()

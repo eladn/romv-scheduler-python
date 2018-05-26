@@ -3,7 +3,7 @@ import argparse
 from user_simulator import TransactionsWorkloadSimulator
 from romv_scheduler import ROMVScheduler
 from serial_scheduler import SerialScheduler
-from scheduler_base_modules import Scheduler
+from scheduler_interface import SchedulerInterface
 from logger import Logger
 from utils import add_feature_to_parser
 
@@ -62,7 +62,7 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
     return parser.parse_args()
 
 
-def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: Scheduler, test_str_len: int):
+def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator, scheduler: SchedulerInterface, test_str_len: int):
     scheduler_type_str = 'ROMV ' + scheduler.scheduling_scheme if isinstance(scheduler,
                                                                              ROMVScheduler) else 'simple-serial'
 

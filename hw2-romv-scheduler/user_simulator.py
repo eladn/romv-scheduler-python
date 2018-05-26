@@ -1,6 +1,8 @@
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
-from scheduler_base_modules import Scheduler, Transaction, Operation, WriteOperation, ReadOperation, CommitOperation
+from operation import Operation, WriteOperation, ReadOperation, CommitOperation
+from scheduler_interface import SchedulerInterface
+from transaction import Transaction, Operation
 from logger import Logger
 
 
@@ -30,7 +32,7 @@ class SchedulerExecutionLogger:
                          log_type_name='wait_for')
 
     @staticmethod
-    def print_variables(scheduler: Scheduler):
+    def print_variables(scheduler: SchedulerInterface):
         Logger().log('Variables: {}'.format(list(scheduler.get_variables())),
                      log_type_name='variables')
 
@@ -162,9 +164,9 @@ class TransactionParsingPatterns:
 # Stores all of the local variables that can be accessed by the operation-simulators.
 # After each operation completes, the `on_complete_callback` will be called (by the scheduler),
 # and the next operation to perform would be added by the `TransactionSimulator`.
-# When the `Scheduler` encounters a deadlock, it chooses a victim transaction and aborts it.
+# When the `SchedulerInterface` encounters a deadlock, it chooses a victim transaction and aborts it.
 # We should "reset" a transaction. Means, if it is aborted we should try to execute it all over again.
-# Prima facie, we could think to add a transaction "reset" feature to the Scheduler module itself.
+# Prima facie, we could think to add a transaction "reset" feature to the SchedulerInterface module itself.
 # In reality it makes no sense to do so, because the read operations might read other values in two different
 # executions. Hence, local-variables (which are not known by the scheduler but only known to the user),
 # might get other realizations during the two executions. Hence, the operations that the user create and add
@@ -290,7 +292,7 @@ class TransactionSimulator:
     def execution_attempt_number(self):
         return self._execution_attempt_no
 
-    def create_transaction(self, scheduler: Scheduler):
+    def create_transaction(self, scheduler: SchedulerInterface):
         assert self._transaction is None
         # Use automatic variable `me` to be captured by the lambda functions. Maybe we could just
         # use `self` in the lambda functions. I didn't want to take the chance it might be wrong.
@@ -364,7 +366,7 @@ class TransactionSimulator:
         self._transaction.add_operation(next_operation_simulator.operation)
         return True
 
-    def operation_completed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
+    def operation_completed(self, transaction: Transaction, scheduler: SchedulerInterface, operation: Operation):
         assert len(self._ongoing_operation_simulators_queue) > 0
 
         operation_simulator = self._ongoing_operation_simulators_queue[0]  # this should be the next awaiting operation
@@ -388,7 +390,7 @@ class TransactionSimulator:
 
         # Note: We no longer add the next operation whenever an operation is finished.
 
-    def operation_failed(self, transaction: Transaction, scheduler: Scheduler, operation: Operation):
+    def operation_failed(self, transaction: Transaction, scheduler: SchedulerInterface, operation: Operation):
         assert not operation.is_completed
         assert len(self._ongoing_operation_simulators_queue) > 0
         operation_simulator = self._ongoing_operation_simulators_queue[0]
@@ -398,7 +400,7 @@ class TransactionSimulator:
         SchedulerExecutionLogger.transaction_action(self, operation_simulator)
         SchedulerExecutionLogger.print_variables(scheduler)
 
-    def transaction_aborted(self, transaction: Transaction, scheduler: Scheduler, abort_reason):
+    def transaction_aborted(self, transaction: Transaction, scheduler: SchedulerInterface, abort_reason):
         assert self._transaction is not None
         assert self._transaction.is_aborted
 
@@ -408,7 +410,7 @@ class TransactionSimulator:
 
         self.reset_transaction(scheduler)
 
-    def scheduler_asked_for_next_operation(self, transaction: Transaction, scheduler: Scheduler):
+    def scheduler_asked_for_next_operation(self, transaction: Transaction, scheduler: SchedulerInterface):
         assert self._transaction is not None
         assert transaction == self._transaction
         self.add_next_operation_to_transaction_if_needed()
@@ -508,7 +510,7 @@ class TransactionsWorkloadSimulator:
     # For each transaction, add the first operation to it.
     # For each transaction, add a callback to be called by the scheduler after an operation has been completed,
     # so that the matching TransactionSimulator would insert the next operation.
-    def add_workload_to_scheduler(self, scheduler: Scheduler):
+    def add_workload_to_scheduler(self, scheduler: SchedulerInterface):
         for transaction_simulator in self._transaction_simulators:
             # FIXME: do we want to just skip the first transaction?
             if transaction_simulator.transaction_id == 0:
@@ -519,7 +521,7 @@ class TransactionsWorkloadSimulator:
         for transaction_simulator in self._transaction_simulators:
             transaction_simulator.reset_simulator()
 
-    def add_initialization_transaction_to_scheduler(self, scheduler: Scheduler):
+    def add_initialization_transaction_to_scheduler(self, scheduler: SchedulerInterface):
         # FIXME: do we want to just detect it as first transaction?
         initialization_transaction = self._transaction_id_to_transaction_simulator[0]
         initialization_transaction.add_transaction_to_scheduler(scheduler)
