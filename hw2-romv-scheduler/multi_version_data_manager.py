@@ -80,6 +80,8 @@ class MultiVersionDataManager:
         assert len(self._disk.access_versions_list_for_variable(variable)) > 0
         return self._disk.access_versions_list_for_variable(variable).peek_back().value
 
+    # This method is used by the GC eventual eviction mechanism.
+    # Removes the version of the given variable with the given ts.
     def delete_old_version(self, variable_to_remove, timestamp_to_remove: Timestamp):
         print('delete_old_version: ', variable_to_remove, timestamp_to_remove)
         version_node = self._disk.find_node_of_certain_version(variable_to_remove, timestamp_to_remove)
@@ -87,45 +89,6 @@ class MultiVersionDataManager:
         assert version_node.next_node is not None
         self._disk.access_versions_list_for_variable(variable_to_remove).remove_node(version_node)
         assert len(self._disk.access_versions_list_for_variable(variable_to_remove)) > 0
-
-    # XXXXXXXXXXXXXXXXXXXX  DEPRECATED! OLD GC (not used)  XXXXXXXXXXXXXXXXXXXX
-    # This method is used by the GC eventual eviction mechanism.
-    # Removes versions of the given variable that are inside of the given timespan
-    # `remove_versions_in_timespan`, but do so only if the promised newer versions
-    # exists. We check for existence of the promised newer versions it in order to
-    # support using `NoFalseNegativeVariablesSet` for the GC mechanism. We elaborate
-    # about it under the GC implementation.
-    # Returns a boolean tuple - (bool,bool)
-    #   The 1st bool: whether the version to remove has been found.
-    #   The 2nd bool: whether the promised newer version has been found.
-    #   The caller may assume the versions to remove has been removed iff both are true.
-    def delete_old_versions_in_interval(self, variable,
-                                        remove_versions_in_timespan: Timespan,
-                                        promised_newer_version_in_timespan: Timespan):
-        assert remove_versions_in_timespan.to_ts <= promised_newer_version_in_timespan.from_ts
-
-        if not self._disk.is_variable_stored_on_disk(variable):
-            return False, False
-
-        flag_remove_found, flag_promised_found = False, False
-        versions_to_remove = []  # marked versions to be remove
-        for version_node in self._disk.access_versions_list_for_variable(variable).reversed_over_nodes():
-            version = version_node.data
-            if remove_versions_in_timespan.from_ts >= version.ts >= remove_versions_in_timespan.to_ts:
-                flag_remove_found = True
-                if flag_promised_found:
-                    # Mark this version to remove. We cannot remove while iterating a list.
-                    # In real-life case we would like to remove it during the iteration.
-                    versions_to_remove.append(version_node)
-            if promised_newer_version_in_timespan.from_ts >= version.ts >= promised_newer_version_in_timespan.to_ts:
-                flag_promised_found = True
-
-        # Actually remove the versioned marked to remove.
-        # In real-life case we would like to remove it during the finding iteration.
-        for version_node_to_remove in versions_to_remove:
-            self._disk.access_versions_list_for_variable(variable).remove_node(version_node_to_remove)
-
-        return flag_remove_found, flag_promised_found
 
     # Used for printing all of the variables to the run-log for debugging purposes.
     def get_variables(self):
