@@ -29,8 +29,22 @@ class UMVTransaction(SchedulerInterface.UTransaction):
         kwargs['is_read_only'] = False
         super().__init__(*args, **kwargs)
 
-        # TODO: doc!
-        self._local_written_values = dict()  # TODO: is it ok to store them on memory only?
+        # The updates made during the update-transaction are stored inside of a local
+        # mapping. It can be stored in the RAM or on the disk or both (caching) - we
+        # did not explicitly referred that (in purpose).
+        # The reason that it is ok is because no other transaction in the system can
+        # read these updated version until this update-transaction commits.
+        # On commit, these updates are written as new versions in the disk.
+        # In a transaction updated a variable more than single time, only the final
+        # version would be stored on the disk. Again, this is ok because the protocol
+        # promises that no other transaction can access these intermediate updates.
+        # When this update transaction performs a read, we first check whether this
+        # variable has been written before by this transaction. If so, we load and
+        # return the value in this the local mapping. Otherwise we read from the disk.
+        # Practically this can be done in real-life case by maintaining a "bloom-filter"
+        # in the memory that indicates which variables that transaction may have written
+        # to avoid this 2 disk accesses.
+        self._local_written_values = dict()
 
         # For each variable that the transaction updates, we store the previous version
         # of that variable. This data is needed for the GC mechanism. In order to know
