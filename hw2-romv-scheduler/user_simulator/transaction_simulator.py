@@ -1,9 +1,12 @@
+from user_simulator.transaction_parsing_patterns import TransactionParsingPatterns
+from user_simulator.operation_simulator import ReadOperationSimulator, WriteOperationSimulator, \
+    CommitOperationSimulator, SuspendOperationSimulator
+from operation import Operation, ReadOperation, WriteOperation, CommitOperation
+from transaction import Transaction
+from scheduler_interface import SchedulerInterface
+from logger import Logger
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
-from operation import Operation, WriteOperation, ReadOperation, CommitOperation
-from scheduler_interface import SchedulerInterface
-from transaction import Transaction, Operation
-from logger import Logger
 
 
 # Used to print the status to output log.
@@ -35,129 +38,6 @@ class SchedulerExecutionLogger:
     def print_variables(scheduler: SchedulerInterface):
         Logger().log('Variables: {}'.format(list(scheduler.get_variables())),
                      log_type_name='variables')
-
-
-# Operation simulator is responsible for storing an operation to perform.
-# A simple `Operation` is not familiar with the concept of "local variables".
-# Sometimes the next operation to perform might read a value from a local variable, or write a value to it.
-# The inheritors `ReadOperationSimulator` and `WriteOperationSimulator` handle accessing these local variables.
-# All of the local variable are stored by the `TransactionSimulator` as can be seen later.
-# The `TransactionSimulator` may contain instances of kind `OperationSimulator`.
-class OperationSimulator:
-    def __init__(self, operation: Operation, operation_number: int):
-        self._operation = operation
-        self._operation_number = operation_number
-
-    @property
-    def operation(self):
-        return self._operation
-
-    @property
-    def operation_number(self):
-        return self._operation_number
-
-    def __str__(self):
-        return 'unknown-operation'
-
-
-class ReadOperationSimulator(OperationSimulator):
-    def __init__(self, operation: Operation, operation_number: int, dest_local_variable_name: str):
-        super().__init__(operation, operation_number)
-        self._dest_local_variable_name = dest_local_variable_name
-
-    @property
-    def dest_local_variable_name(self):
-        return self._dest_local_variable_name
-
-    def __str__(self):
-        assert isinstance(self.operation, ReadOperation)
-        ret_str = self._dest_local_variable_name + '=r(' + self.operation.variable + ')'
-        if self.operation.is_completed:
-            ret_str += '=' + self.operation.read_value
-        return ret_str
-
-
-class WriteOperationSimulator(OperationSimulator):
-    def __init__(self, operation: Operation, operation_number: int, src_local_variable_name_or_const_val):
-        super().__init__(operation, operation_number)
-        self._src_local_variable_name = None
-        self._const_val = None
-        potential_identifier = str(src_local_variable_name_or_const_val).strip()
-        if potential_identifier.isidentifier():
-            self._src_local_variable_name = potential_identifier
-        else:
-            self._const_val = src_local_variable_name_or_const_val  # TODO: do we want to cast the value to int() ?
-
-    def get_value_to_write(self, local_variables):
-        if self._const_val is not None:
-            assert self._src_local_variable_name is None
-            return self._const_val
-        assert self._src_local_variable_name is not None
-        return local_variables[self._src_local_variable_name]
-
-    def __str__(self):
-        assert isinstance(self.operation, WriteOperation)
-        src_value_to_write = self._src_local_variable_name if self._const_val is None else self._const_val
-        actual_value_written = ''
-        if self._const_val is None and self.operation.is_completed:
-            actual_value_written = '=' + self.operation.to_write_value
-        ret_str = 'w(' + self.operation.variable + ', ' + src_value_to_write + actual_value_written + ')'
-        return ret_str
-
-
-class CommitOperationSimulator(OperationSimulator):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def __str__(self):
-        return 'commit'
-
-
-class SuspendOperationSimulator(OperationSimulator):
-    def __init__(self, operation_number: int):
-        super().__init__(None, operation_number)
-
-    def __str__(self):
-        return 'suspend'
-
-
-# Collection of patterns used for parsing the input workload test file.
-# Used by the method: TransactionSimulator.parse_transaction_from_test_line(..)
-# Used by the method: TransactionSimulator.parse_and_add_operation(..)
-class TransactionParsingPatterns:
-    number_pattern = '(([1-9][0-9]*)|0)'
-    identifier_pattern = '[a-zA-Z_][a-zA-Z_0-9]*'
-    const_value_pattern = number_pattern
-    local_var_identifier_pattern = '(?P<local_var_identifier>' + identifier_pattern + ')'
-    var_identifier_pattern = '(?P<var_identifier>' + identifier_pattern + ')'
-    optional_line_comment_pattern = '(?P<line_comment>((\/\/)|(\#)).*)?'
-
-    comment_line_pattern = '^[\s]*' + optional_line_comment_pattern + '$'
-
-    scheduling_scheme_num = '(?P<scheduling_scheme_num>[12])'
-    num_of_transactions = '(?P<num_of_transactions>' + number_pattern + ')'
-    test_first_line_pattern = '^' + scheduling_scheme_num + \
-                              '[\s]+' + num_of_transactions + \
-                              '[\s]*' + optional_line_comment_pattern + '$'
-
-    transaction_type_pattern = '(?P<transaction_type>[UR])'
-    transaction_id_pattern = '(?P<transaction_id>' + number_pattern + ')'
-    transaction_header_pattern = transaction_type_pattern + '[\s]+' + \
-                                 transaction_id_pattern + '[\s]+' + \
-                                 '(?P<transaction_operations>.*)\;'
-    transaction_line_pattern = '^' + transaction_header_pattern + \
-                               '[\s]*' + optional_line_comment_pattern + '$'
-
-    write_value_pattern = '(?P<write_value>' + local_var_identifier_pattern + '|' + const_value_pattern + ')'
-    write_operation_pattern = '(w\(' + var_identifier_pattern + '[\s]*\,[\s]*' + write_value_pattern + '\))'
-    read_operation_pattern = '(' + local_var_identifier_pattern + \
-                             '[\s]*\=[\s]*' + \
-                             'r\(' + var_identifier_pattern + '\))'
-    commit_operation_pattern = '(c' + transaction_id_pattern + ')'
-    suspend_operation_pattern = '(suspend)'
-    operation_pattern = '(?P<operation>(' + read_operation_pattern + '|' + write_operation_pattern + \
-                        '|' + commit_operation_pattern + '|' + suspend_operation_pattern + '))'
-    operations_pattern = '(' + operation_pattern + '[\s]+)*'
 
 
 # Simulate the execution of a transaction.
@@ -447,81 +327,3 @@ class TransactionSimulator:
             transaction_id=self._transaction_id,
             is_ro=('R' if self._is_read_only else 'U'),
             execution_attempt_number=execution_attempt_number_str)
-
-
-# Parse the input test file and add transactions and their operations to the given scheduler.
-class TransactionsWorkloadSimulator:
-    def __init__(self):
-        self._transaction_simulators = []
-        self._transaction_id_to_transaction_simulator = dict()  # FIXME: maybe we don't need it
-        self._schedule = 'RR'
-
-    @property
-    def schedule(self):
-        return self._schedule
-
-    # Parse the test file and add its contents to the simulator.
-    def load_test_data(self, workload_data_filename):
-        with open(workload_data_filename, 'r') as test_file:
-
-            # Read comment lines before the test first line.
-            test_first_line = TransactionsWorkloadSimulator._read_first_nonempty_line_that_is_not_comment(test_file)
-
-            # Parse test first line (scheduling scheme, number of transactions).
-            test_first_line = test_first_line.strip()
-            test_first_line_parser = regex.compile(TransactionParsingPatterns.test_first_line_pattern)
-            parsed_test_first_line = test_first_line_parser.match(test_first_line)
-            assert parsed_test_first_line
-            assert len(parsed_test_first_line.capturesdict()['num_of_transactions']) == 1
-            num_of_transactions = int(parsed_test_first_line.capturesdict()['num_of_transactions'][0])
-            assert len(parsed_test_first_line.capturesdict()['scheduling_scheme_num']) == 1
-            scheduling_scheme_num = int(parsed_test_first_line.capturesdict()['scheduling_scheme_num'][0])
-            assert scheduling_scheme_num in {1, 2}
-            self._schedule = 'serial' if (scheduling_scheme_num == 1) else 'RR'
-
-            # Note: each transaction is promised to be contained in its own single line.
-            for transaction_line in test_file:
-                transaction_line = transaction_line.strip()
-                if not transaction_line:
-                    continue  # ignore a blank line
-                if TransactionsWorkloadSimulator._is_comment_line(transaction_line):
-                    continue
-                transaction_simulator = TransactionSimulator.parse_transaction_from_test_line(transaction_line)
-                self._transaction_simulators.append(transaction_simulator)
-                self._transaction_id_to_transaction_simulator[transaction_simulator.transaction_id] = transaction_simulator
-            assert num_of_transactions == len(self._transaction_simulators)
-
-    @staticmethod
-    def _is_comment_line(test_line):
-        comment_line_parser = regex.compile(TransactionParsingPatterns.comment_line_pattern)
-        parsed_comment_line = comment_line_parser.match(test_line)
-        return parsed_comment_line is not None
-
-    @staticmethod
-    def _read_first_nonempty_line_that_is_not_comment(test_file):
-        for line in test_file:
-            if not line.strip():
-                continue
-            if not TransactionsWorkloadSimulator._is_comment_line(line):
-                return line
-        return None
-
-    # Given an scheduler, initiate the transactions (except for T0) in the scheduler.
-    # For each transaction, add the first operation to it.
-    # For each transaction, add a callback to be called by the scheduler after an operation has been completed,
-    # so that the matching TransactionSimulator would insert the next operation.
-    def add_workload_to_scheduler(self, scheduler: SchedulerInterface):
-        for transaction_simulator in self._transaction_simulators:
-            # FIXME: do we want to just skip the first transaction?
-            if transaction_simulator.transaction_id == 0:
-                continue
-            transaction_simulator.add_transaction_to_scheduler(scheduler)
-
-    def reset_simulator(self):
-        for transaction_simulator in self._transaction_simulators:
-            transaction_simulator.reset_simulator()
-
-    def add_initialization_transaction_to_scheduler(self, scheduler: SchedulerInterface):
-        # FIXME: do we want to just detect it as first transaction?
-        initialization_transaction = self._transaction_id_to_transaction_simulator[0]
-        initialization_transaction.add_transaction_to_scheduler(scheduler)

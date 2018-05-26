@@ -1,6 +1,6 @@
 import os
 import argparse
-from user_simulator import TransactionsWorkloadSimulator
+from user_simulator.transactions_workload_simulator import TransactionsWorkloadSimulator
 from romv_scheduler import ROMVScheduler
 from serial_scheduler import SerialScheduler
 from scheduler_interface import SchedulerInterface
@@ -100,8 +100,7 @@ def run_workload_simulator_on_scheduler(simulator: TransactionsWorkloadSimulator
     simulator.add_workload_to_scheduler(scheduler)
     scheduler.run()
 
-    # Print 2 blank lines in the end of the run.
-    Logger().log()
+    # Print a blank line in the end of the run.
     Logger().log()
 
     # Print the data:
@@ -152,8 +151,9 @@ def run_scheduling_test(scheduling_type, test_file_path):
         run_workload_simulator_on_scheduler(simulator, scheduler, test_str_len)
 
     elif scheduling_type == 'compare-all':
+        romv_rr_simulator = simulator.clone()
         romv_rr_scheduler = ROMVScheduler('RR')
-        run_workload_simulator_on_scheduler(simulator, romv_rr_scheduler, test_str_len)
+        run_workload_simulator_on_scheduler(romv_rr_simulator, romv_rr_scheduler, test_str_len)
         romv_rr_serialization_order = romv_rr_scheduler.get_serialization_order()
 
         # TODO: add the transactions to serial schedulers by the `romv_rr_serialization_order`.
@@ -161,16 +161,16 @@ def run_scheduling_test(scheduling_type, test_file_path):
         Logger().log()
 
         # romv_scheduler
+        romv_serial_simulator = simulator.clone()
         romv_serial_scheduler = ROMVScheduler('serial')
-        simulator.reset_simulator()
-        run_workload_simulator_on_scheduler(simulator, romv_serial_scheduler, test_str_len)
+        run_workload_simulator_on_scheduler(romv_serial_simulator, romv_serial_scheduler, test_str_len)
 
         Logger().log()
 
         # simple serial scheduler
+        simple_serial_simulator = simulator.clone()
         simple_serial_scheduler = SerialScheduler()
-        simulator.reset_simulator()
-        run_workload_simulator_on_scheduler(simulator, simple_serial_scheduler, test_str_len)
+        run_workload_simulator_on_scheduler(simple_serial_simulator, simple_serial_scheduler, test_str_len)
 
         # TODO: compare results of `romv_rr_scheduler`, `romv_serial_scheduler` and `simple_serial_scheduler`!
         # TODO: compare the local variables of the operation simulators!
