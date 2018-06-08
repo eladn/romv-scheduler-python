@@ -150,11 +150,24 @@ class CommitOperationSimulator(OperationSimulator):
 
 
 class SuspendOperationSimulator(OperationSimulator):
-    def __init__(self, operation_number: int):
+    def __init__(self, nr_yield_epochs: int, operation_number: int):
+        assert nr_yield_epochs >= 1
         super().__init__(None, operation_number)
+        self._nr_yield_epochs = nr_yield_epochs
+        self._nr_completed_yield_epochs = 0
+
+    def next_epoch(self):
+        assert self._nr_completed_yield_epochs < self._nr_yield_epochs
+        self._nr_completed_yield_epochs += 1
+
+    def should_still_yield(self):
+        return self._nr_completed_yield_epochs < self._nr_yield_epochs
 
     def __str__(self):
-        return 'suspend'
+        text = 'yield'
+        if self._nr_yield_epochs > 1:
+            text += '[{}/{}]'.format(self._nr_completed_yield_epochs, self._nr_yield_epochs)
+        return text
 
     @staticmethod
     def compare_all(*operation_simulators):

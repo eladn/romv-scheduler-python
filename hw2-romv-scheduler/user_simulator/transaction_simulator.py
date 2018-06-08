@@ -169,7 +169,13 @@ class TransactionSimulator:
             self.add_commit_operation_simulator(CommitOperation())
 
         elif parsed_suspend_operation:
-            self.add_suspend_operation_simulator()
+            nr_yield_epochs = 1
+            if 'nr_yield_epochs' in parsed_suspend_operation.capturesdict()\
+                    and len(parsed_suspend_operation.capturesdict()['nr_yield_epochs']) > 0:
+                nr_yield_epochs = parsed_suspend_operation.capturesdict()['nr_yield_epochs']
+                assert len(nr_yield_epochs) == 1
+                nr_yield_epochs = int(nr_yield_epochs[0])
+            self.add_suspend_operation_simulator(nr_yield_epochs)
 
     @property
     def transaction_id(self):
@@ -230,8 +236,8 @@ class TransactionSimulator:
         operation_simulator = CommitOperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
         self._all_operation_simulators.append(operation_simulator)
 
-    def add_suspend_operation_simulator(self):
-        operation_simulator = SuspendOperationSimulator(len(self._all_operation_simulators) + 1)
+    def add_suspend_operation_simulator(self, nr_yield_epochs: int):
+        operation_simulator = SuspendOperationSimulator(nr_yield_epochs, len(self._all_operation_simulators) + 1)
         self._all_operation_simulators.append(operation_simulator)
 
     # Called when the transaction waiting queue is empty the scheduler asks for the next operation to perform.
@@ -243,7 +249,11 @@ class TransactionSimulator:
 
         # For suspend operation simulator, we do not add any operation to the transaction.
         if isinstance(next_operation_simulator, SuspendOperationSimulator):
-            self.operation_completed(self._transaction, None, None)
+            next_operation_simulator.next_epoch()
+            if not next_operation_simulator.should_still_yield():
+                self.operation_completed(self._transaction, None, None)
+            else:
+                SchedulerExecutionLogger.transaction_action(self, next_operation_simulator)
             return False
 
         assert next_operation_simulator.operation is not None
