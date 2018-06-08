@@ -1,5 +1,5 @@
 from user_simulator.transaction_parsing_patterns import TransactionParsingPatterns
-from user_simulator.transaction_simulator import TransactionSimulator
+from user_simulator.transaction_simulator import TransactionSimulator, TransactionSimulatorParser
 from scheduler_interface import SchedulerInterface
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 
@@ -50,7 +50,7 @@ class TransactionsWorkloadSimulator:
                     continue  # ignore a blank line
                 if TransactionsWorkloadSimulator._is_comment_line(transaction_line):
                     continue
-                transaction_simulator = TransactionSimulator.parse_transaction_from_test_line(transaction_line)
+                transaction_simulator = TransactionSimulatorParser.parse_transaction_from_test_line(transaction_line)
                 self._transaction_simulators.append(transaction_simulator)
                 self._transaction_id_to_transaction_simulator[transaction_simulator.transaction_id] = transaction_simulator
             assert num_of_transactions == len(self._transaction_simulators)

@@ -1,7 +1,7 @@
 from user_simulator.transaction_parsing_patterns import TransactionParsingPatterns
 from user_simulator.operation_simulator import OperationSimulator, ReadOperationSimulator, \
-    WriteOperationSimulator, CommitOperationSimulator, SuspendOperationSimulator
-from operation import Operation, ReadOperation, WriteOperation, CommitOperation
+    SuspendOperationSimulator, OperationSimulatorParser
+from operation import Operation, ReadOperation
 from transaction import Transaction
 from scheduler_interface import SchedulerInterface
 from logger import Logger
@@ -90,93 +90,6 @@ class TransactionSimulator:
     def transaction(self):
         return self._transaction
 
-    # Factory function. creates a `TransactionSimulator` from a test line.
-    @staticmethod
-    def parse_transaction_from_test_line(transaction_line: str):
-        transaction_line = transaction_line.strip()
-        transaction_line_parser = regex.compile(TransactionParsingPatterns.transaction_line_pattern)
-        parsed_transaction_line = transaction_line_parser.match(transaction_line)
-
-        assert parsed_transaction_line
-        assert len(parsed_transaction_line.capturesdict()['transaction_id']) == 1
-        transaction_id = int(parsed_transaction_line.capturesdict()['transaction_id'][0])
-        assert len(parsed_transaction_line.capturesdict()['transaction_type']) == 1
-        transaction_type = parsed_transaction_line.capturesdict()['transaction_type'][0]
-        assert transaction_type in {'R', 'U'}
-        is_read_only = (transaction_type == 'R')
-
-        assert len(parsed_transaction_line.capturesdict()['transaction_operations']) == 1
-        operations_str = parsed_transaction_line.capturesdict()['transaction_operations'][0].strip()
-        operations_str += ' '  # the operations parser expects each operation to terminate with following spaces.
-
-        transaction_simulator = TransactionSimulator(transaction_id, is_read_only)
-
-        operations_parser = regex.compile('^' + TransactionParsingPatterns.operations_pattern + '$')
-        parsed_operations = operations_parser.match(operations_str)
-        assert parsed_operations
-        for operation_str in parsed_operations.capturesdict()['operation']:
-            assert operation_str
-            transaction_simulator.parse_and_add_operation(operation_str)
-
-        return transaction_simulator
-
-    def parse_and_add_operation(self, operation_str):
-        read_operation_parser = regex.compile('^' + TransactionParsingPatterns.read_operation_pattern + '$')
-        parsed_read_operation = read_operation_parser.match(operation_str)
-        write_operation_parser = regex.compile('^' + TransactionParsingPatterns.write_operation_pattern + '$')
-        parsed_write_operation = write_operation_parser.match(operation_str)
-        commit_operation_parser = regex.compile('^' + TransactionParsingPatterns.commit_operation_pattern + '$')
-        parsed_commit_operation = commit_operation_parser.match(operation_str)
-        suspend_operation_parser = regex.compile('^' + TransactionParsingPatterns.suspend_operation_pattern + '$')
-        parsed_suspend_operation = suspend_operation_parser.match(operation_str)
-
-        number_of_parsed_op_types = bool(parsed_read_operation) + \
-                                    bool(parsed_write_operation) + \
-                                    bool(parsed_commit_operation) + \
-                                    bool(parsed_suspend_operation)
-        assert number_of_parsed_op_types == 1
-
-        if parsed_read_operation:
-            local_var_identifier = parsed_read_operation.capturesdict()['local_var_identifier']
-            assert len(local_var_identifier) == 1
-            local_var_identifier = local_var_identifier[0]
-
-            var_identifier = parsed_read_operation.capturesdict()['var_identifier']
-            assert len(var_identifier) == 1
-            var_identifier = var_identifier[0]
-
-            read_operation = ReadOperation(var_identifier)
-            self.add_read_operation_simulator(read_operation, local_var_identifier)
-
-        elif parsed_write_operation:
-            var_identifier = parsed_write_operation.capturesdict()['var_identifier']
-            assert len(var_identifier) == 1
-            var_identifier = var_identifier[0]
-
-            write_value = parsed_write_operation.capturesdict()['write_value']
-            assert len(write_value) == 1
-            write_value = write_value[0]
-
-            write_operation = WriteOperation(var_identifier)
-            self.add_write_operation_simulator(write_operation, write_value)
-
-        elif parsed_commit_operation:
-            transaction_id = parsed_commit_operation.capturesdict()['transaction_id']
-            assert len(transaction_id) == 1
-            transaction_id = int(transaction_id[0])
-            assert transaction_id == self.transaction_id
-
-            self.add_commit_operation_simulator(CommitOperation())
-
-        elif parsed_suspend_operation:
-            nr_yield_epochs = 1
-            if 'nr_yield_epochs' in parsed_suspend_operation.capturesdict()\
-                    and len(parsed_suspend_operation.capturesdict()['nr_yield_epochs']) > 0:
-                nr_yield_epochs = parsed_suspend_operation.capturesdict()['nr_yield_epochs']
-                assert len(nr_yield_epochs) == 1
-                nr_yield_epochs = int(nr_yield_epochs[0])
-            self.add_suspend_operation_simulator(nr_yield_epochs)
-
     @property
     def transaction_id(self):
         return self._transaction_id
@@ -216,29 +129,6 @@ class TransactionSimulator:
         assert self._transaction.is_aborted
         self._transaction = None
         self.add_transaction_to_scheduler(scheduler)
-
-    def add_write_operation_simulator(self, write_operation: WriteOperation, src_variable_name_or_const_val):
-        assert self._execution_attempt_no == 0 and self._transaction is None
-        operation_simulator = WriteOperationSimulator(write_operation,
-                                                      len(self._all_operation_simulators) + 1,
-                                                      src_variable_name_or_const_val)
-        self._all_operation_simulators.append(operation_simulator)
-
-    def add_read_operation_simulator(self, read_operation: ReadOperation, dest_variable_name):
-        assert self._execution_attempt_no == 0 and self._transaction is None
-        operation_simulator = ReadOperationSimulator(read_operation,
-                                                     len(self._all_operation_simulators) + 1,
-                                                     dest_variable_name)
-        self._all_operation_simulators.append(operation_simulator)
-
-    def add_commit_operation_simulator(self, commit_operation: CommitOperation):
-        assert self._execution_attempt_no == 0 and self._transaction is None
-        operation_simulator = CommitOperationSimulator(commit_operation, len(self._all_operation_simulators) + 1)
-        self._all_operation_simulators.append(operation_simulator)
-
-    def add_suspend_operation_simulator(self, nr_yield_epochs: int):
-        operation_simulator = SuspendOperationSimulator(nr_yield_epochs, len(self._all_operation_simulators) + 1)
-        self._all_operation_simulators.append(operation_simulator)
 
     # Called when the transaction waiting queue is empty the scheduler asks for the next operation to perform.
     def add_next_operation_to_transaction_if_needed(self):
@@ -369,3 +259,38 @@ class TransactionSimulator:
         for operation_simulators in zip(*(transaction_simulator._completed_operation_simulators_queue
                                           for transaction_simulator in transaction_simulators)):
             OperationSimulator.compare_all(*operation_simulators)
+
+
+class TransactionSimulatorParser:
+
+    # Factory function. creates a `TransactionSimulator` from a test line.
+    @staticmethod
+    def parse_transaction_from_test_line(transaction_line: str):
+        transaction_line = transaction_line.strip()
+        transaction_line_parser = regex.compile(TransactionParsingPatterns.transaction_line_pattern)
+        parsed_transaction_line = transaction_line_parser.match(transaction_line)
+
+        assert parsed_transaction_line
+        assert len(parsed_transaction_line.capturesdict()['transaction_id']) == 1
+        transaction_id = int(parsed_transaction_line.capturesdict()['transaction_id'][0])
+        assert len(parsed_transaction_line.capturesdict()['transaction_type']) == 1
+        transaction_type = parsed_transaction_line.capturesdict()['transaction_type'][0]
+        assert transaction_type in {'R', 'U'}
+        is_read_only = (transaction_type == 'R')
+
+        assert len(parsed_transaction_line.capturesdict()['transaction_operations']) == 1
+        operations_str = parsed_transaction_line.capturesdict()['transaction_operations'][0].strip()
+        operations_str += ' '  # the operations parser expects each operation to terminate with following spaces.
+
+        transaction_simulator = TransactionSimulator(transaction_id, is_read_only)
+
+        operations_parser = regex.compile('^' + TransactionParsingPatterns.operations_pattern + '$')
+        parsed_operations = operations_parser.match(operations_str)
+        assert parsed_operations
+        for operation_str in parsed_operations.capturesdict()['operation']:
+            assert operation_str
+            operation_simulator = OperationSimulatorParser.parse(operation_str, transaction_id)
+            operation_simulator.operation_number = len(transaction_simulator._all_operation_simulators) + 1
+            transaction_simulator._all_operation_simulators.append(operation_simulator)
+
+        return transaction_simulator
