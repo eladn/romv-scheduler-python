@@ -1,0 +1,10 @@
+// test2
+2 6  // 2=round robin, test2
+//DO T0
+U 0 w(x,1) w(y,2) w(z,3) w(u,4) w(v,5) c0; 
+//START ROUND ROBIN HERE
+U 1 a0=r(x) w(y, a0) c1; // one letter per trans. (e.g., ‘a’)
+R 2 NULL*7 b0=r(x) b1=r(y) skip*2 b2=r(z) b3=r(v) c2; 
+U 3 c0=r(v) c1=r(y) w(u, c0) c3;
+R 4 NULL*11 d0=r(x) d1=r(u) d2=r(v) d3=r(y) c4; 
+U 5 e0=r(z) w(y, e0) c5;

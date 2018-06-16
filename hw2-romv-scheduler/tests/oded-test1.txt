@@ -1,0 +1,17 @@
+// test1
+2 12  // 2=round robin, test1
+//DO T0
+U 0 w(x,1) w(y,2) w(z,3) w(u,4) w(v,5) c0; // Updater
+//START ROUND ROBIN HERE
+R 1 b0=r(x) b1=r(y) b2=r(z) b3=r(v) c1; //Read only
+U 2 w(x,11) c2;
+U 3 w(u,14) c3;
+R 4 d0=r(x) d1=r(u) d2=r(v) d3=r(y) c4; 
+U 5 w(v,15) c5;
+U 6 w(y, 12) c6;
+R 7 e0=r(x) e1=r(u) e2=r(v) e3=r(y) c7; 
+U 8 a0=r(x) w(y, a0) c8;
+U 9 w(x,4) c0=r(y) c9;
+U 10 w(x,8) w(y,9) w(v,3) c10;
+R 11 f0=r(x) c11;
+
