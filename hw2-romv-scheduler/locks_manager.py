@@ -19,11 +19,17 @@ class LocksManager:
 
         # Mapping from variable to a set of transactions that
         # hold a read lock for this variable.
+        # { variable: set(transaction_id) }
         self._read_locks_table = defaultdict(set)
 
         # Mapping from variable to the transaction-id of the (single)
         # transaction that holds a write lock for this variable.
+        # { variable: transaction_id }
         self._write_locks_table = dict()
+
+    @property
+    def deadlock_detector(self):
+        return self._deadlock_detector
 
     # Returns a set of transaction-ids of the transactions that hold locks
     # that collide with the given requested lock (variable, read_or_write).
@@ -31,7 +37,7 @@ class LocksManager:
     def _collides_with(self, transaction_id, variable, read_or_write):
         assert read_or_write in {'read', 'write'}
         if variable in self._write_locks_table:
-            assert len(self._read_locks_table[variable]) == 0 \
+            assert variable not in self._read_locks_table.keys() \
                    or self._read_locks_table[variable] == {self._write_locks_table[variable]}
             if self._write_locks_table[variable] == transaction_id:
                 return None
@@ -121,3 +127,6 @@ class LocksManager:
     # Returns whether there is a deadlock at the moment
     def is_deadlock(self):
         return self._deadlock_detector.find_deadlock_cycle() is not None
+
+    def __str__(self):
+        return 'read locks: ' + str(dict(self._read_locks_table)) + '   ;   write locks:' + str(self._write_locks_table)
