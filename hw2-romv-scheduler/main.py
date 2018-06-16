@@ -77,6 +77,14 @@ If not specified, the ROMV scheduler is used with the scheduling scheme (RR/seri
                           help='Use in order to print the scheduling type in the right side of each printed run-log line.')
     add_feature_to_parser(parser, ['--log-serialization-point'], default=True,
                           help='Use in order to print the serialization point of each transaction.')
+    add_feature_to_parser(parser, ['--log-active-trans'], default=False,
+                          help='Use in order to print the currently active transactions in the system, after each operation attempt.')
+    add_feature_to_parser(parser, ['--log-serialized-trans'], default=False,
+                          help='Use in order to print the currently active transactions that assigned with timestamp, after each operation attempt.')
+    add_feature_to_parser(parser, ['--log-locks-table'], default=False,
+                          help='Use in order to print the locks table, after each operation attempt.')
+    add_feature_to_parser(parser, ['--log-wait-for-graph'], default=False,
+                          help='Use in order to print the wait-for graph of the locks manager, after each operation attempt.')
 
     log_all_or_none = parser.add_mutually_exclusive_group(required=False)
     log_all_or_none.add_argument('--log-all', '-la', action='store_true', default=False,
@@ -246,7 +254,8 @@ if __name__ == '__main__':
     if not test_files:
         test_files = [os.path.join(TESTS_DIR, filename)
                       for filename in os.listdir(TESTS_DIR)
-                      if os.path.isfile(os.path.join(TESTS_DIR, filename))]
+                      if filename and filename[0] != '.'
+                      and os.path.isfile(os.path.join(TESTS_DIR, filename))]
     assert isinstance(test_files, list)
 
     # Run the tests one-by-one.

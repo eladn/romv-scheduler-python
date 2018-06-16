@@ -172,7 +172,7 @@ class SuspendOperationSimulator(OperationSimulator):
         return self._nr_completed_yield_epochs < self._nr_yield_epochs
 
     def __str__(self):
-        text = 'yield'
+        text = 'skip'
         if self._nr_yield_epochs > 1:
             text += '[{}/{}]'.format(self._nr_completed_yield_epochs, self._nr_yield_epochs)
         return text

@@ -247,6 +247,10 @@ class SchedulerInterface(ABC):
                 raise SchedulerInterface.NotEqualException(
                     'Not all schedulers have the same values of variable {variable}.'.format(variable=variable_name))
 
+    @property
+    def transactions(self):
+        return iter(self._ongoing_transactions_by_tid)
+
     # Called by the scheduler each time the method `add_transaction()` is called.
     # Might be overridden by the inheritor scheduler, if it has to do something
     # each time a transaction is added.

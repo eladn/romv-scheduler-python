@@ -53,6 +53,14 @@ class ROMVScheduler(SchedulerInterface):
         self._ongoing_ro_transactions_sorted_by_timestamp = DoublyLinkedList()
 
     @property
+    def locks_manager(self):
+        return self._locks_manager
+
+    @property
+    def ongoing_ro_transactions_sorted_by_timestamp(self):
+        return iter(self._ongoing_ro_transactions_sorted_by_timestamp)
+
+    @property
     def mv_data_manager(self):
         return self._mv_data_manager
 

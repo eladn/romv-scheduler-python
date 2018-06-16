@@ -4,6 +4,7 @@ from user_simulator.operation_simulator import OperationSimulator, ReadOperation
 from operation import Operation, ReadOperation
 from transaction import Transaction
 from scheduler_interface import SchedulerInterface
+from romv_scheduler import ROMVScheduler
 from logger import Logger
 import regex  # for parsing the test file. we use `regex` rather than known `re` to support named groups in patterns.
 import copy  # for deep-coping the operation-simulators list, each transaction execution attempt.
@@ -18,7 +19,7 @@ class SchedulerExecutionLogger:
                                                           abort_reason=reason))
 
     @staticmethod
-    def transaction_action(transaction_simulator, operation_simulator):
+    def transaction_action(scheduler: SchedulerInterface, transaction_simulator, operation_simulator):
         full_state = (' ' + transaction_simulator.to_full_state_str()
                       if Logger().is_log_type_set_on('transaction_state') else '')
         action_no = str(operation_simulator.operation_number)
@@ -33,12 +34,27 @@ class SchedulerExecutionLogger:
             waiting=(wait_str if is_waiting else ' ' * len(wait_str)),
             full_state=full_state))
         if is_waiting:
-            Logger().log('     Waiting for locks from transactions: ' + str(transaction_simulator.transaction.waits_for),
+            Logger().log('     Locks: Waiting for locks from transactions: ' +
+                         str(transaction_simulator.transaction.waits_for),
                          log_type_name='wait_for')
+
+        if scheduler:
+            Logger().log('     Active transactions: ' +
+                         str([transaction.transaction_id for transaction in scheduler.transactions]), 'active-trans')
+        if isinstance(scheduler, ROMVScheduler):
+            Logger().log('     Serialized active transactions: ' +
+                         str([transaction.transaction_id
+                              for transaction in scheduler.ongoing_ro_transactions_sorted_by_timestamp]),
+                         'serialized-trans')
+            Logger().log('     Locks table: ' +
+                         str(scheduler.locks_manager), 'locks-table')
+            Logger().log('     Wait-for-graph edges: ' +
+                         str(scheduler.locks_manager.deadlock_detector.wait_for_graph.edges()),
+                         'wait-for-graph')
 
     @staticmethod
     def print_variables(scheduler: SchedulerInterface):
-        Logger().log('Variables: {}'.format(list(scheduler.get_variables())),
+        Logger().log('     Variables: {}'.format(list(scheduler.get_variables())),
                      log_type_name='variables')
 
 
@@ -131,7 +147,7 @@ class TransactionSimulator:
         self.add_transaction_to_scheduler(scheduler)
 
     # Called when the transaction waiting queue is empty the scheduler asks for the next operation to perform.
-    def add_next_operation_to_transaction_if_needed(self):
+    def add_next_operation_to_transaction_if_needed(self, scheduler: SchedulerInterface):
         assert self._transaction is not None
         if len(self._ongoing_operation_simulators_queue) < 1:
             return False
@@ -143,7 +159,7 @@ class TransactionSimulator:
             if not next_operation_simulator.should_still_yield():
                 self.operation_completed(self._transaction, None, None)
             else:
-                SchedulerExecutionLogger.transaction_action(self, next_operation_simulator)
+                SchedulerExecutionLogger.transaction_action(scheduler, self, next_operation_simulator)
             return False
 
         assert next_operation_simulator.operation is not None
@@ -166,7 +182,7 @@ class TransactionSimulator:
             self._local_variables[dest_local_var_name] = operation.read_value
 
         # print to execution log!
-        SchedulerExecutionLogger.transaction_action(self, operation_simulator)
+        SchedulerExecutionLogger.transaction_action(scheduler, self, operation_simulator)
 
         if scheduler is not None:
             SchedulerExecutionLogger.print_variables(scheduler)
@@ -184,7 +200,7 @@ class TransactionSimulator:
         assert(operation == operation_simulator.operation)
 
         # print to execution log!
-        SchedulerExecutionLogger.transaction_action(self, operation_simulator)
+        SchedulerExecutionLogger.transaction_action(scheduler, self, operation_simulator)
         SchedulerExecutionLogger.print_variables(scheduler)
 
     def transaction_aborted(self, transaction: Transaction, scheduler: SchedulerInterface, abort_reason):
@@ -200,7 +216,7 @@ class TransactionSimulator:
     def scheduler_asked_for_next_operation(self, transaction: Transaction, scheduler: SchedulerInterface):
         assert self._transaction is not None
         assert transaction == self._transaction
-        self.add_next_operation_to_transaction_if_needed()
+        self.add_next_operation_to_transaction_if_needed(scheduler)
 
     def to_full_state_str(self):
         max_operation_str_size = 11
