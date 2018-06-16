@@ -33,7 +33,7 @@ class TransactionParsingPatterns:
                              '[\s]*\=[\s]*' + \
                              'r\(' + var_identifier_pattern + '\))'
     commit_operation_pattern = '(c' + transaction_id_pattern + ')'
-    suspend_operation_pattern = '((suspend|yield)(\*(?P<nr_yield_epochs>' + number_pattern + '))?)'
+    suspend_operation_pattern = '((suspend|yield|skip|SKIP|null|NULL)(\*(?P<nr_yield_epochs>' + number_pattern + '))?)'
     operation_pattern = '(?P<operation>(' + read_operation_pattern + '|' + write_operation_pattern + \
                         '|' + commit_operation_pattern + '|' + suspend_operation_pattern + '))'
     operations_pattern = '(' + operation_pattern + '[\s]+)*'
