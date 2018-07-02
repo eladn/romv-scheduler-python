@@ -40,17 +40,18 @@ class SchedulerExecutionLogger:
 
         if scheduler:
             Logger().log('     Active transactions: ' +
-                         str([transaction.transaction_id for transaction in scheduler.transactions]), 'active-trans')
+                         str([transaction.transaction_id for transaction in scheduler.transactions]),
+                         log_type_name='active_trans')
         if isinstance(scheduler, ROMVScheduler):
             Logger().log('     Serialized active transactions: ' +
                          str([transaction.transaction_id
                               for transaction in scheduler.ongoing_ro_transactions_sorted_by_timestamp]),
-                         log_type_name='serialized-trans')
+                         log_type_name='serialized_trans')
             Logger().log('     Locks table: ' +
-                         str(scheduler.locks_manager), log_type_name='locks-table')
+                         str(scheduler.locks_manager), log_type_name='locks_table')
             Logger().log('     Wait-for-graph edges: ' +
                          str(scheduler.locks_manager.deadlock_detector.wait_for_graph.edges()),
-                         log_type_name='wait-for-graph')
+                         log_type_name='wait_for_graph')
 
     @staticmethod
     def print_variables(scheduler: SchedulerInterface):
