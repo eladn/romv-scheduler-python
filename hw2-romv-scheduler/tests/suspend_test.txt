@@ -3,8 +3,8 @@ U 0 w(x,1) w(y,2) w(z,3) w(u,4) w(v,5) c0;
 R 1 a0=r(x) a2=r(v) a3=r(u) c1;
 U 2 c0=r(v) w(u, c0) c2;
 U 3 d0=r(z) d1=r(y) w(y, d0) d2=r(y) c3;
-R 4 suspend suspend suspend f3=r(y) f4=r(x) c4;
-R 5 suspend suspend suspend suspend e0=r(y) e1=r(x) c5;
+R 4 skip*3 f3=r(y) f4=r(x) c4;
+R 5 skip*4 e0=r(y) e1=r(x) c5;
 U 6 s0=r(x) w(x, 8) c6;
 
 # simulate a case where -  R1-born : U1-commit : U2-commit : R2-born : U3-commit : R3-born
